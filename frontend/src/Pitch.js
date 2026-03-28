@@ -1,7 +1,7 @@
 import React from "react";
 import fieldImg from "./field.png";
 
-const Pitch = ({ players, frame }) => {
+const Pitch = ({ players, frame, visiblePlayers }) => {
     if (!players || Object.keys(players).length === 0) return <div>Loading players...</div>;
 
     const widthPx = 1050;
@@ -14,8 +14,7 @@ const Pitch = ({ players, frame }) => {
         colors[dev] = colorPalette[i % colorPalette.length];
     });
 
-    // Calcular límites globales
-    // Calcular límites globales de forma eficiente
+    // Calcular límites globales de forma eficiente (usando SIEMPRE todos los jugadores)
     let minLat = Infinity, maxLat = -Infinity;
     let minLon = Infinity, maxLon = -Infinity;
 
@@ -43,8 +42,11 @@ const Pitch = ({ players, frame }) => {
             }}
         >
             {Object.entries(players).map(([dev, positions]) => {
+                // 🛑 FILTRO VISUAL: Si el jugador no está en la lista de visibles, no lo dibujamos
+                if (visiblePlayers && !visiblePlayers.includes(dev)) return null;
+
                 const pos = positions[frame] || positions[positions.length - 1];
-                if (!pos) return null; // protección extra
+                if (!pos) return null;
 
                 return (
                     <div
@@ -58,6 +60,7 @@ const Pitch = ({ players, frame }) => {
                             backgroundColor: colors[dev],
                             borderRadius: "50%",
                             border: "1px solid white",
+                            transform: "translate(-50%, -50%)", // Centra el punto en la coordenada exacta
                         }}
                         title={`Jugador ${dev}`}
                     />
