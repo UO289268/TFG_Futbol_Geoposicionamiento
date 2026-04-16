@@ -4,7 +4,6 @@ import json
 
 app = FastAPI()
 
-# 🌐 Permitir acceso desde React
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,25 +12,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar datos UNA VEZ
-with open("data/frames.json") as f:
-    frames = json.load(f)  # frames es lista de dicts con jugadores: [{DEV, lat, lon, vel, ...}, ...]
-
-# 🔹 Reorganizar datos por jugador
-players_dict = {}
-for frame in frames:
-    for p in frame:
-        dev = str(p["DEV"])
-        if dev not in players_dict:
-            players_dict[dev] = []
-        
-        # Añadimos la velocidad ("vel") aquí para que el frontend pueda usarla
-        players_dict[dev].append({
-            "lat": p["lat"],
-            "lon": p["lon"],
-            "time": p.get("local_time", None),  # opcional
-            "vel": p.get("vel", 0)  # <--- NUEVA LÍNEA: extraemos la velocidad (por defecto 0 si no existe)
-        })
+# Cargar el JSON que acabamos de generar con el script
+with open("data/frames_sincronizados.json") as f:
+    data = json.load(f)
 
 @app.get("/")
 def root():
@@ -39,5 +22,5 @@ def root():
 
 @app.get("/frames")
 def get_frames():
-    # Retorna todos los jugadores con sus trayectorias y velocidades
-    return {"players": players_dict}
+    # Ya está en el formato perfecto {"players": {"10": [...], "9": [...]}}
+    return data

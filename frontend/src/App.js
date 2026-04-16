@@ -49,7 +49,7 @@ function App() {
     }, 100 / speed);
 
     return () => clearInterval(interval);
-  }, [players, maxFrames, isPlaying, speed]); // <-- IMPORTANTE: añadir speed a las dependencias
+  }, [players, maxFrames, isPlaying, speed]);
 
   const handleCheckboxChange = (dev) => {
     setVisiblePlayers(prev =>
@@ -59,15 +59,25 @@ function App() {
     );
   };
 
+  // Cálculos de estadísticas (Actualizado para ignorar los frames en los que el jugador no existe)
   let currentVel = 0, maxVel = 0, distance = 0;
   if (selectedPlayer && players[selectedPlayer]) {
     const historyToCurrentFrame = players[selectedPlayer].slice(0, frame + 1);
     if (historyToCurrentFrame.length > 0) {
-      currentVel = historyToCurrentFrame[historyToCurrentFrame.length - 1].vel || 0;
+
+      // Proteger la velocidad actual por si justo en este frame es null
+      const lastData = historyToCurrentFrame[historyToCurrentFrame.length - 1];
+      currentVel = lastData ? (lastData.vel || 0) : 0;
+
       for (let i = 0; i < historyToCurrentFrame.length; i++) {
-        const v = historyToCurrentFrame[i].vel || 0;
-        if (v > maxVel) maxVel = v;
-        distance += v * 0.1;
+        const frameData = historyToCurrentFrame[i];
+
+        // ¡Magia! Solo calculamos si el jugador realmente tiene datos en este frame
+        if (frameData) {
+          const v = frameData.vel || 0;
+          if (v > maxVel) maxVel = v;
+          distance += v * 0.1;
+        }
       }
     }
   }
@@ -77,7 +87,13 @@ function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "20px" }}>
 
-      <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} />
+      {/* AÑADIDO: selectedPlayer={selectedPlayer} para que se pinte de rojo */}
+      <Pitch
+        players={players}
+        frame={frame}
+        visiblePlayers={visiblePlayers}
+        selectedPlayer={selectedPlayer}
+      />
 
       <div style={{ display: "flex", flexDirection: "column", width: "1050px", backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "8px", marginTop: "10px", boxSizing: "border-box" }}>
 
@@ -88,7 +104,7 @@ function App() {
             {isPlaying ? "⏸ Pause" : "▶ Play"}
           </button>
 
-          {/* NUEVO: Botonera de Velocidad */}
+          {/* Botonera de Velocidad */}
           <div style={{ display: "flex", gap: "5px", borderRight: "2px solid #ccc", paddingRight: "15px" }}>
             {[1, 2, 10].map(multiplier => (
               <button

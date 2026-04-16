@@ -13,6 +13,10 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer }) => {
 
     Object.values(players).forEach(positions => {
         positions.forEach(pos => {
+            // 🛡️ ¡ESTA ES LA LÍNEA QUE FALTABA! 
+            // Si pos es null, cortamos aquí y pasamos a la siguiente coordenada
+            if (!pos) return;
+
             if (pos.lat < minLat) minLat = pos.lat;
             if (pos.lat > maxLat) maxLat = pos.lat;
             if (pos.lon < minLon) minLon = pos.lon;
@@ -38,7 +42,9 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer }) => {
                 // 🛑 FILTRO VISUAL: Si el jugador no está en la lista de visibles, no lo dibujamos
                 if (visiblePlayers && !visiblePlayers.includes(dev)) return null;
 
-                const pos = positions[frame] || positions[positions.length - 1];
+                // Ahora es:
+                const pos = positions[frame];
+                // Si es null (no estaba activo a esta hora), no renderiza nada
                 if (!pos) return null;
 
                 // Color uniforme oscuro, pero resaltamos en rojo al jugador seleccionado
