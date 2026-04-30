@@ -1,22 +1,18 @@
 import React from "react";
 import fieldImg from "./field.png";
 
-const Pitch = ({ players, frame, visiblePlayers, selectedPlayer }) => {
-    if (!players || Object.keys(players).length === 0) return <div>Loading players...</div>;
+const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles }) => {
+    if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
 
     const widthPx = 1050;
     const heightPx = 680;
 
-    // Calcular límites globales de forma eficiente (usando SIEMPRE todos los jugadores)
     let minLat = Infinity, maxLat = -Infinity;
     let minLon = Infinity, maxLon = -Infinity;
 
     Object.values(players).forEach(positions => {
         positions.forEach(pos => {
-            // 🛡️ ¡ESTA ES LA LÍNEA QUE FALTABA! 
-            // Si pos es null, cortamos aquí y pasamos a la siguiente coordenada
             if (!pos) return;
-
             if (pos.lat < minLat) minLat = pos.lat;
             if (pos.lat > maxLat) maxLat = pos.lat;
             if (pos.lon < minLon) minLon = pos.lon;
@@ -36,20 +32,25 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer }) => {
                 backgroundImage: `url(${fieldImg})`,
                 backgroundSize: "cover",
                 border: "2px solid #333",
+                boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
             }}
         >
             {Object.entries(players).map(([dev, positions]) => {
-                // 🛑 FILTRO VISUAL: Si el jugador no está en la lista de visibles, no lo dibujamos
+                // Si está en el banquillo (o no visible), no lo dibujamos
                 if (visiblePlayers && !visiblePlayers.includes(dev)) return null;
 
-                // Ahora es:
                 const pos = positions[frame];
-                // Si es null (no estaba activo a esta hora), no renderiza nada
                 if (!pos) return null;
 
-                // Color uniforme oscuro, pero resaltamos en rojo al jugador seleccionado
+                // --- LÓGICA DE COLORES SEGÚN POSICIÓN ---
+                const role = playerRoles && playerRoles[dev] ? playerRoles[dev] : "Banquillo";
+                let bgColor = "#000000"; // Negro para Banquillo por defecto
+
+                if (role === "Defensa") bgColor = "#3498db";   // Azul
+                if (role === "Medio") bgColor = "#f1c40f";     // Amarillo
+                if (role === "Delantero") bgColor = "#e74c3c"; // Rojo
+
                 const isSelected = dev === selectedPlayer;
-                const backgroundColor = isSelected ? "#e74c3c" : "#2c3e50";
 
                 return (
                     <div
@@ -58,27 +59,25 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer }) => {
                             position: "absolute",
                             left: `${lonToPx(pos.lon)}px`,
                             top: `${latToPx(pos.lat)}px`,
-                            width: "24px",   // Ampliado para que quepa el dorsal
-                            height: "24px",  // Ampliado para que quepa el dorsal
-                            backgroundColor: backgroundColor,
+                            width: isSelected ? "28px" : "24px",
+                            height: isSelected ? "28px" : "24px",
+                            backgroundColor: bgColor,
                             borderRadius: "50%",
-                            border: isSelected ? "2px solid #f1c40f" : "2px solid white",
-                            transform: "translate(-50%, -50%)", // Centra el punto en la coordenada exacta
-
-                            // Propiedades Flexbox para centrar el número dentro del círculo
+                            border: isSelected ? "3px solid white" : "2px solid rgba(255,255,255,0.7)",
+                            transform: "translate(-50%, -50%)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            color: "white",
-                            fontSize: "11px",
+                            color: role === "Medio" ? "black" : "white", // Para que el texto se lea bien en amarillo
+                            fontSize: isSelected ? "13px" : "11px",
                             fontWeight: "bold",
                             fontFamily: "Arial, sans-serif",
-                            boxShadow: "0px 3px 5px rgba(0,0,0,0.4)", // Sombra para dar relieve
-                            zIndex: isSelected ? 10 : 1, // El seleccionado siempre se dibuja por encima
+                            boxShadow: isSelected ? "0px 0px 10px white" : "0px 3px 5px rgba(0,0,0,0.4)",
+                            zIndex: isSelected ? 10 : 1,
+                            transition: "background-color 0.3s ease, width 0.2s, height 0.2s" // Suaviza el cambio
                         }}
-                        title={`Jugador ${dev}`}
+                        title={`Dorsal ${dev} - ${role}`}
                     >
-                        {/* El número del dorsal renderizado dentro del punto */}
                         {dev}
                     </div>
                 );
