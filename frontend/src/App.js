@@ -24,10 +24,11 @@ function App() {
   const [resumen, setResumen] = useState(null);
   const [showResumen, setShowResumen] = useState(false);
 
-  // NUEVO ESTADO: Campos y Límites
+  // NUEVO ESTADO: Campos, Límites y Líneas Tácticas
   const [fields, setFields] = useState([]);
   const [selectedField, setSelectedField] = useState("");
   const [fieldLimits, setFieldLimits] = useState(null);
+  const [showLines, setShowLines] = useState(false);
 
   const formatFrameToTime = (frameNumber) => {
     const totalSeconds = frameNumber / 10;
@@ -336,8 +337,16 @@ function App() {
 
       <div style={{ flex: "0 0 1050px", display: "flex", flexDirection: "column" }}>
 
-        {/* PASAMOS LOS LÍMITES AL COMPONENTE PITCH */}
-        <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} />
+        {/* PASAMOS LOS LÍMITES AL COMPONENTE PITCH Y EL ESTADO DE LAS LÍNEAS */}
+        <Pitch
+          players={players}
+          frame={frame}
+          visiblePlayers={visiblePlayers}
+          selectedPlayer={selectedPlayer}
+          playerRoles={playerRoles}
+          fieldLimits={fieldLimits}
+          showLines={showLines}
+        />
 
         <div style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "8px", marginTop: "10px", boxSizing: "border-box" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "15px", marginBottom: "15px" }}>
@@ -403,9 +412,24 @@ function App() {
 
       <div style={{ flex: 1, backgroundColor: "#ecf0f1", padding: "20px", borderRadius: "8px", boxShadow: "0 4px 8px rgba(0,0,0,0.2)" }}>
         <h3 style={{ borderBottom: "2px solid #bdc3c7", paddingBottom: "10px", marginTop: 0, color: "#2c3e50" }}>Gestión Táctica</h3>
-        <p style={{ fontSize: "13px", color: "#7f8c8d", marginBottom: "20px" }}>Asigna posiciones para sacar a los jugadores al campo o envíalos al banquillo.</p>
+        <p style={{ fontSize: "13px", color: "#7f8c8d", marginBottom: "15px" }}>Asigna posiciones para sacar a los jugadores al campo o envíalos al banquillo.</p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto", maxHeight: "calc(100vh - 120px)" }}>
+        {/* --- NUEVO CHECKBOX DE LÍNEAS --- */}
+        <div style={{ marginBottom: "20px", padding: "10px", backgroundColor: "#fff", borderRadius: "5px", border: "1px solid #bdc3c7", display: "flex", alignItems: "center", gap: "10px" }}>
+          <input
+            type="checkbox"
+            id="lines-toggle"
+            checked={showLines}
+            onChange={(e) => setShowLines(e.target.checked)}
+            style={{ width: "18px", height: "18px", cursor: "pointer" }}
+          />
+          <label htmlFor="lines-toggle" style={{ fontWeight: "bold", cursor: "pointer", color: "#2c3e50" }}>
+            Unir líneas por posición
+          </label>
+        </div>
+        {/* ------------------------------- */}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto", maxHeight: "calc(100vh - 170px)" }}>
           {Object.keys(players).map(dev => {
             const currentRole = playerRoles[dev] || "Banquillo";
             const isPlaying = currentRole !== "Banquillo";
