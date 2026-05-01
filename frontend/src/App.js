@@ -16,11 +16,13 @@ function App() {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  // --- NUEVO ESTADO: Formulario de Carga ---
+  // --- NUEVO ESTADO: Formulario de Carga y Resumen ---
   const [selectedFile, setSelectedFile] = useState(null);
   const [matchTimes, setMatchTimes] = useState({
     start_h1: "", end_h1: "", start_h2: "", end_h2: ""
   });
+  const [resumen, setResumen] = useState(null);
+  const [showResumen, setShowResumen] = useState(false);
 
   const formatFrameToTime = (frameNumber) => {
     const totalSeconds = frameNumber / 10;
@@ -31,6 +33,7 @@ function App() {
 
   const setupData = (data) => {
     setPlayers(data.players);
+    setResumen(data.resumen); // Guardamos la tabla calculada por Python
     let max = 0;
     Object.values(data.players).forEach(p => {
       if (p.length > max) max = p.length;
@@ -63,7 +66,6 @@ function App() {
     setMatchTimes({ ...matchTimes, [e.target.name]: e.target.value });
   };
 
-  // NUEVA FUNCIÓN: Se ejecuta al dar clic al botón de enviar
   const processDataClick = async () => {
     if (!selectedFile) {
       setError("Por favor, selecciona un archivo Excel primero.");
@@ -211,7 +213,87 @@ function App() {
   }
 
   return (
-    <div style={{ display: "flex", gap: "20px", padding: "20px", backgroundColor: "#2c3e50", minHeight: "100vh", fontFamily: "Arial, sans-serif" }}>
+    <div style={{ display: "flex", gap: "20px", padding: "20px", backgroundColor: "#2c3e50", minHeight: "100vh", fontFamily: "Arial, sans-serif", position: "relative" }}>
+
+      {/* BOTÓN FLOTANTE PARA VER MÉTRICAS TOTALES */}
+      {resumen && (
+        <button
+          onClick={() => setShowResumen(true)}
+          style={{
+            position: "fixed", bottom: "30px", right: "30px", zIndex: 1000,
+            padding: "15px 25px", backgroundColor: "#f1c40f", color: "#2c3e50",
+            border: "none", borderRadius: "50px", fontWeight: "bold", fontSize: "16px",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.4)", cursor: "pointer"
+          }}
+        >
+          📊 Métricas Totales
+        </button>
+      )}
+
+      {/* VENTANA MODAL DEL RESUMEN */}
+      {showResumen && resumen && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+          backgroundColor: "rgba(0,0,0,0.85)", zIndex: 2000, display: "flex",
+          alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{
+            backgroundColor: "white", padding: "30px", borderRadius: "12px",
+            width: "90%", maxHeight: "85%", overflowY: "auto", position: "relative"
+          }}>
+            <button
+              onClick={() => setShowResumen(false)}
+              style={{ position: "absolute", top: "20px", right: "20px", cursor: "pointer", fontSize: "20px", border: "none", background: "none" }}
+            >
+              ✖
+            </button>
+
+            <h2 style={{ color: "#2c3e50", marginBottom: "20px", textAlign: "center" }}>Estadísticas Finales del Partido</h2>
+
+            <table style={{ width: "100%", borderCollapse: "collapse", color: "#333" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#34495e", color: "white" }}>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Jugador</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Período</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Distancia (m)</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Vel. Máx (m/s)</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Sprints</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Aceleraciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(resumen).map(([dev, playerStats]) => (
+                  <React.Fragment key={dev}>
+                    <tr style={{ backgroundColor: "#fdfdfd" }}>
+                      <td rowSpan="3" style={{ textAlign: "center", fontWeight: "bold", border: "1px solid #ddd" }}>Dorsal {dev}</td>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>1ª Parte</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.dist}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.max_v}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.sprints}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.acels}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>2ª Parte</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.dist}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.max_v}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.sprints}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.acels}</td>
+                    </tr>
+                    <tr style={{ backgroundColor: "#f1f8ff", fontWeight: "bold" }}>
+                      <td style={{ padding: "8px", border: "1px solid #ddd" }}>TOTAL</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.dist}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.max_v}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.sprints}</td>
+                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.acels}</td>
+                    </tr>
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div style={{ flex: "0 0 1050px", display: "flex", flexDirection: "column" }}>
         <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} />
 
