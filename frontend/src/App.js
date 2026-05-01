@@ -16,13 +16,18 @@ function App() {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  // --- NUEVO ESTADO: Formulario de Carga y Resumen ---
+  // Estados de Formulario
   const [selectedFile, setSelectedFile] = useState(null);
   const [matchTimes, setMatchTimes] = useState({
     start_h1: "", end_h1: "", start_h2: "", end_h2: ""
   });
   const [resumen, setResumen] = useState(null);
   const [showResumen, setShowResumen] = useState(false);
+
+  // NUEVO ESTADO: Campos y Límites
+  const [fields, setFields] = useState([]);
+  const [selectedField, setSelectedField] = useState("");
+  const [fieldLimits, setFieldLimits] = useState(null);
 
   const formatFrameToTime = (frameNumber) => {
     const totalSeconds = frameNumber / 10;
@@ -33,7 +38,9 @@ function App() {
 
   const setupData = (data) => {
     setPlayers(data.players);
-    setResumen(data.resumen); // Guardamos la tabla calculada por Python
+    setResumen(data.resumen);
+    setFieldLimits(data.field_limits); // Guardamos los límites fijos del campo
+
     let max = 0;
     Object.values(data.players).forEach(p => {
       if (p.length > max) max = p.length;
@@ -49,6 +56,21 @@ function App() {
     }
     setIsLoaded(true);
   };
+
+  // Cargar lista de campos al arrancar la app
+  useEffect(() => {
+    async function fetchFields() {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/fields");
+        const data = await res.json();
+        setFields(data);
+        if (data.length > 0) setSelectedField(data[0].id);
+      } catch (e) {
+        console.error("Error cargando la lista de campos", e);
+      }
+    }
+    fetchFields();
+  }, []);
 
   useEffect(() => {
     async function checkExistingData() {
@@ -71,10 +93,16 @@ function App() {
       setError("Por favor, selecciona un archivo Excel primero.");
       return;
     }
+    if (!selectedField) {
+      setError("Por favor, selecciona el campo donde se jugó.");
+      return;
+    }
+
     setUploading(true);
     setError(null);
     try {
-      await uploadExcel(selectedFile, matchTimes);
+      // Pasamos el ID del campo a la API
+      await uploadExcel(selectedFile, matchTimes, selectedField);
       const data = await getFrames();
       setupData(data);
     } catch (err) {
@@ -110,29 +138,43 @@ function App() {
   // --- PANTALLA INICIAL DE CARGA ---
   if (!isLoaded) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif" }}>
-        <h1 style={{ marginBottom: "10px", fontSize: "36px" }}>TFG Fútbol - Análisis Táctico</h1>
-        <p style={{ marginBottom: "30px", color: "#bdc3c7", fontSize: "16px" }}>Carga los datos GPS y filtra el tiempo real de juego.</p>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif", padding: "20px" }}>
+        <h1 style={{ marginBottom: "10px", fontSize: "36px", textAlign: "center" }}>TFG Fútbol - Análisis Táctico</h1>
+        <p style={{ marginBottom: "30px", color: "#bdc3c7", fontSize: "16px", textAlign: "center" }}>Calibra las coordenadas del campo y filtra el tiempo real de juego.</p>
 
-        <div style={{ backgroundColor: "#34495e", padding: "40px", borderRadius: "10px", border: "2px solid #7f8c8d", width: "500px", boxShadow: "0 10px 20px rgba(0,0,0,0.3)" }}>
+        <div style={{ backgroundColor: "#34495e", padding: "40px", borderRadius: "10px", border: "2px solid #7f8c8d", width: "100%", maxWidth: "600px", boxShadow: "0 10px 20px rgba(0,0,0,0.3)" }}>
           {uploading ? (
             <div style={{ textAlign: "center" }}>
               <h3 style={{ color: "#f1c40f" }}>Procesando y Sincronizando...</h3>
-              <p style={{ fontSize: "14px", color: "#bdc3c7" }}>Recortando descansos y aplicando filtros de aceleración.</p>
+              <p style={{ fontSize: "14px", color: "#bdc3c7" }}>Calculando distancias y anclando coordenadas satelitales.</p>
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
 
-              <div style={{ textAlign: "center" }}>
+              <div style={{ textAlign: "center", backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
+                <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1" }}>1. Archivo de Datos (GPS)</h4>
                 <input type="file" accept=".xlsx, .xls" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
                 <label htmlFor="excel-upload" style={{ display: "inline-block", padding: "12px 20px", backgroundColor: selectedFile ? "#2980b9" : "#7f8c8d", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
-                  {selectedFile ? `✅ ${selectedFile.name}` : "📁 1. Seleccionar Excel"}
+                  {selectedFile ? `✅ ${selectedFile.name}` : "📁 Cargar Excel"}
                 </label>
               </div>
 
               <div style={{ backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
-                <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1", textAlign: "center" }}>2. Tiempos de Partido (Opcional)</h4>
+                <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1", textAlign: "center" }}>2. Calibración del Terreno de Juego</h4>
+                <select
+                  value={selectedField}
+                  onChange={(e) => setSelectedField(e.target.value)}
+                  style={{ width: "100%", padding: "12px", borderRadius: "5px", border: "none", cursor: "pointer", fontSize: "16px", fontWeight: "bold", color: "#2c3e50" }}
+                >
+                  {fields.length === 0 && <option value="">Cargando campos disponibles...</option>}
+                  {fields.map(f => (
+                    <option key={f.id} value={f.id}>{f.nombre}</option>
+                  ))}
+                </select>
+              </div>
 
+              <div style={{ backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
+                <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1", textAlign: "center" }}>3. Tiempos de Partido (Opcional)</h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px" }}>
                   <div style={{ display: "flex", flexDirection: "column" }}>
                     <label style={{ fontSize: "12px", color: "#bdc3c7" }}>Inicio 1ª Parte</label>
@@ -154,14 +196,14 @@ function App() {
               </div>
 
               <button onClick={processDataClick} style={{ padding: "15px", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "5px", fontSize: "18px", fontWeight: "bold", cursor: "pointer", transition: "0.2s" }}>
-                ▶ Procesar Partido
+                ▶ Iniciar Simulador
               </button>
             </div>
           )}
         </div>
 
         {error && (
-          <div style={{ marginTop: "20px", padding: "15px", backgroundColor: "#e74c3c", borderRadius: "5px", color: "white", fontWeight: "bold", maxWidth: "500px", textAlign: "center" }}>
+          <div style={{ marginTop: "20px", padding: "15px", backgroundColor: "#e74c3c", borderRadius: "5px", color: "white", fontWeight: "bold", maxWidth: "600px", textAlign: "center" }}>
             ⚠️ {error}
           </div>
         )}
@@ -215,7 +257,6 @@ function App() {
   return (
     <div style={{ display: "flex", gap: "20px", padding: "20px", backgroundColor: "#2c3e50", minHeight: "100vh", fontFamily: "Arial, sans-serif", position: "relative" }}>
 
-      {/* BOTÓN FLOTANTE PARA VER MÉTRICAS TOTALES */}
       {resumen && (
         <button
           onClick={() => setShowResumen(true)}
@@ -230,7 +271,6 @@ function App() {
         </button>
       )}
 
-      {/* VENTANA MODAL DEL RESUMEN */}
       {showResumen && resumen && (
         <div style={{
           position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
@@ -295,7 +335,9 @@ function App() {
       )}
 
       <div style={{ flex: "0 0 1050px", display: "flex", flexDirection: "column" }}>
-        <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} />
+
+        {/* PASAMOS LOS LÍMITES AL COMPONENTE PITCH */}
+        <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} />
 
         <div style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "8px", marginTop: "10px", boxSizing: "border-box" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "15px", marginBottom: "15px" }}>

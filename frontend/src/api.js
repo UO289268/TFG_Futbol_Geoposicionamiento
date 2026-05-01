@@ -2,16 +2,21 @@ const API_URL = "http://127.0.0.1:8000";
 
 export async function getFrames() {
     const response = await fetch(`${API_URL}/frames`);
+
     if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Error al obtener los datos");
     }
+
     return await response.json();
 }
 
-export async function uploadExcel(file, times) {
+export async function uploadExcel(file, times, fieldId) {
     const formData = new FormData();
     formData.append("file", file);
+
+    // ¡AQUÍ ESTÁ LA CLAVE! Añadimos el ID del campo seleccionado
+    formData.append("field_id", fieldId || "");
 
     // Añadimos los tiempos al formulario que viaja al backend
     formData.append("start_h1", times.start_h1 || "");

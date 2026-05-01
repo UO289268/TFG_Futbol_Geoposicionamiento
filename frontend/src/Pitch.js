@@ -1,25 +1,19 @@
 import React from "react";
 import fieldImg from "./field.png";
 
-const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles }) => {
+const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits }) => {
     if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
+
+    // Si todavía no han llegado los límites fijos desde el servidor, mostramos un aviso
+    if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
 
     const widthPx = 1050;
     const heightPx = 680;
 
-    let minLat = Infinity, maxLat = -Infinity;
-    let minLon = Infinity, maxLon = -Infinity;
+    // 📍 USAMOS LOS LÍMITES FIJOS DEL CAMPO SELECCIONADO EN GOOGLE MAPS
+    const { maxLat, minLat, minLon, maxLon } = fieldLimits;
 
-    Object.values(players).forEach(positions => {
-        positions.forEach(pos => {
-            if (!pos) return;
-            if (pos.lat < minLat) minLat = pos.lat;
-            if (pos.lat > maxLat) maxLat = pos.lat;
-            if (pos.lon < minLon) minLon = pos.lon;
-            if (pos.lon > maxLon) maxLon = pos.lon;
-        });
-    });
-
+    // Ahora la conversión a píxeles es perfecta y no se deforma nunca
     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
 
@@ -33,6 +27,8 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles }) 
                 backgroundSize: "cover",
                 border: "2px solid #333",
                 boxShadow: "0 4px 10px rgba(0,0,0,0.5)",
+                // MUY IMPORTANTE: Esto oculta a los jugadores si se salen de los límites (ej. van al vestuario)
+                overflow: "hidden"
             }}
         >
             {Object.entries(players).map(([dev, positions]) => {
@@ -74,7 +70,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles }) 
                             fontFamily: "Arial, sans-serif",
                             boxShadow: isSelected ? "0px 0px 10px white" : "0px 3px 5px rgba(0,0,0,0.4)",
                             zIndex: isSelected ? 10 : 1,
-                            transition: "background-color 0.3s ease, width 0.2s, height 0.2s" // Suaviza el cambio
+                            transition: "background-color 0.3s ease, left 0.1s linear, top 0.1s linear" // Transición más fluida para el movimiento
                         }}
                         title={`Dorsal ${dev} - ${role}`}
                     >
