@@ -2,6 +2,14 @@ import React, { useEffect, useState } from "react";
 import { getFrames, uploadExcel } from "./api";
 import Pitch from "./Pitch";
 
+// Roles por defecto
+const DEFAULT_ROLES = [
+  { id: "Banquillo", name: "Banquillo ⚫", color: "#000000", isDefault: true },
+  { id: "Defensa", name: "Defensa 🔵", color: "#3498db", isDefault: true },
+  { id: "Medio", name: "Medio 🟡", color: "#f1c40f", isDefault: true },
+  { id: "Delantero", name: "Delantero 🔴", color: "#e74c3c", isDefault: true }
+];
+
 function App() {
   const [players, setPlayers] = useState({});
   const [frame, setFrame] = useState(0);
@@ -24,11 +32,18 @@ function App() {
   const [resumen, setResumen] = useState(null);
   const [showResumen, setShowResumen] = useState(false);
 
-  // NUEVO ESTADO: Campos, Límites y Líneas Tácticas
+  // Campos, Límites, Líneas Tácticas y UMBRALES
   const [fields, setFields] = useState([]);
   const [selectedField, setSelectedField] = useState("");
   const [fieldLimits, setFieldLimits] = useState(null);
   const [showLines, setShowLines] = useState(false);
+  const [thresholds, setThresholds] = useState({ sprint: 24.0, hsr: 21.0, acel: 3.0 });
+  const [activeConfig, setActiveConfig] = useState(null);
+
+  // NUEVO: Gestión Dinámica de Roles
+  const [roles, setRoles] = useState(DEFAULT_ROLES);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleColor, setNewRoleColor] = useState("#9b59b6"); // Morado por defecto
 
   const formatFrameToTime = (frameNumber) => {
     const totalSeconds = frameNumber / 10;
@@ -40,7 +55,8 @@ function App() {
   const setupData = (data) => {
     setPlayers(data.players);
     setResumen(data.resumen);
-    setFieldLimits(data.field_limits); // Guardamos los límites fijos del campo
+    setFieldLimits(data.field_limits);
+    setActiveConfig(data.config);
 
     let max = 0;
     Object.values(data.players).forEach(p => {
@@ -58,7 +74,6 @@ function App() {
     setIsLoaded(true);
   };
 
-  // Cargar lista de campos al arrancar la app
   useEffect(() => {
     async function fetchFields() {
       try {
@@ -66,9 +81,7 @@ function App() {
         const data = await res.json();
         setFields(data);
         if (data.length > 0) setSelectedField(data[0].id);
-      } catch (e) {
-        console.error("Error cargando la lista de campos", e);
-      }
+      } catch (e) { console.error("Error cargando la lista de campos", e); }
     }
     fetchFields();
   }, []);
@@ -78,54 +91,32 @@ function App() {
       try {
         const data = await getFrames();
         setupData(data);
-      } catch (err) {
-        setIsLoaded(false);
-      }
+      } catch (err) { setIsLoaded(false); }
     }
     checkExistingData();
   }, []);
 
-  const handleTimeChange = (e) => {
-    setMatchTimes({ ...matchTimes, [e.target.name]: e.target.value });
-  };
+  const handleTimeChange = (e) => setMatchTimes({ ...matchTimes, [e.target.name]: e.target.value });
 
   const processDataClick = async () => {
-    if (!selectedFile) {
-      setError("Por favor, selecciona un archivo Excel primero.");
-      return;
-    }
-    if (!selectedField) {
-      setError("Por favor, selecciona el campo donde se jugó.");
-      return;
-    }
+    if (!selectedFile) return setError("Por favor, selecciona un archivo Excel primero.");
+    if (!selectedField) return setError("Por favor, selecciona el campo donde se jugó.");
 
     setUploading(true);
     setError(null);
     try {
-      // Pasamos el ID del campo a la API
-      await uploadExcel(selectedFile, matchTimes, selectedField);
+      await uploadExcel(selectedFile, matchTimes, selectedField, thresholds);
       const data = await getFrames();
       setupData(data);
-    } catch (err) {
-      setError(err.message || "Error desconocido al procesar el archivo");
-    } finally {
-      setUploading(false);
-    }
+    } catch (err) { setError(err.message || "Error desconocido al procesar el archivo"); }
+    finally { setUploading(false); }
   };
 
   useEffect(() => {
     if (!players || maxFrames === 0 || !isPlaying || !isLoaded) return;
-    const interval = setInterval(() => {
-      setFrame(f => (f + 1) % maxFrames);
-    }, 100 / speed);
+    const interval = setInterval(() => { setFrame(f => (f + 1) % maxFrames); }, 100 / speed);
     return () => clearInterval(interval);
   }, [players, maxFrames, isPlaying, speed, isLoaded]);
-
-  const handleCheckboxChange = (dev) => {
-    setVisiblePlayers(prev =>
-      prev.includes(dev) ? prev.filter(p => p !== dev) : [...prev, dev]
-    );
-  };
 
   const handleRoleChange = (dev, newRole) => {
     setPlayerRoles(prev => ({ ...prev, [dev]: newRole }));
@@ -136,12 +127,37 @@ function App() {
     }
   };
 
-  // --- PANTALLA INICIAL DE CARGA ---
+  // --- NUEVAS FUNCIONES DE ROLES DINÁMICOS ---
+  const handleAddRole = () => {
+    if (newRoleName.trim() === "") return;
+    const id = newRoleName.trim();
+    if (roles.some(r => r.id === id)) return alert("Esta posición ya existe");
+
+    setRoles([...roles, { id: id, name: id, color: newRoleColor, isDefault: false }]);
+    setNewRoleName("");
+  };
+
+  const handleDeleteRole = (roleId) => {
+    // 1. A los jugadores que tenían este rol, los mandamos al Banquillo
+    const newPlayerRoles = { ...playerRoles };
+    Object.keys(newPlayerRoles).forEach(dev => {
+      if (newPlayerRoles[dev] === roleId) {
+        newPlayerRoles[dev] = "Banquillo";
+        setVisiblePlayers(prev => prev.filter(p => p !== dev)); // Los ocultamos del campo
+      }
+    });
+    setPlayerRoles(newPlayerRoles);
+
+    // 2. Borramos el rol de la lista
+    setRoles(roles.filter(r => r.id !== roleId));
+  };
+  // --------------------------------------------
+
   if (!isLoaded) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif", padding: "20px" }}>
         <h1 style={{ marginBottom: "10px", fontSize: "36px", textAlign: "center" }}>TFG Fútbol - Análisis Táctico</h1>
-        <p style={{ marginBottom: "30px", color: "#bdc3c7", fontSize: "16px", textAlign: "center" }}>Calibra las coordenadas del campo y filtra el tiempo real de juego.</p>
+        <p style={{ marginBottom: "30px", color: "#bdc3c7", fontSize: "16px", textAlign: "center" }}>Calibra las coordenadas del campo y ajusta el rendimiento.</p>
 
         <div style={{ backgroundColor: "#34495e", padding: "40px", borderRadius: "10px", border: "2px solid #7f8c8d", width: "100%", maxWidth: "600px", boxShadow: "0 10px 20px rgba(0,0,0,0.3)" }}>
           {uploading ? (
@@ -151,7 +167,6 @@ function App() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
-
               <div style={{ textAlign: "center", backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
                 <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1" }}>1. Archivo de Datos (GPS)</h4>
                 <input type="file" accept=".xlsx, .xls" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
@@ -162,15 +177,9 @@ function App() {
 
               <div style={{ backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
                 <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1", textAlign: "center" }}>2. Calibración del Terreno de Juego</h4>
-                <select
-                  value={selectedField}
-                  onChange={(e) => setSelectedField(e.target.value)}
-                  style={{ width: "100%", padding: "12px", borderRadius: "5px", border: "none", cursor: "pointer", fontSize: "16px", fontWeight: "bold", color: "#2c3e50" }}
-                >
+                <select value={selectedField} onChange={(e) => setSelectedField(e.target.value)} style={{ width: "100%", padding: "12px", borderRadius: "5px", border: "none", cursor: "pointer", fontSize: "16px", fontWeight: "bold", color: "#2c3e50" }}>
                   {fields.length === 0 && <option value="">Cargando campos disponibles...</option>}
-                  {fields.map(f => (
-                    <option key={f.id} value={f.id}>{f.nombre}</option>
-                  ))}
+                  {fields.map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
                 </select>
               </div>
 
@@ -196,6 +205,24 @@ function App() {
                 </div>
               </div>
 
+              <div style={{ backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
+                <h4 style={{ margin: "0 0 15px 0", color: "#ecf0f1", textAlign: "center" }}>4. Umbrales de Rendimiento</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <label style={{ fontSize: "11px", color: "#bdc3c7" }}>Sprint (km/h)</label>
+                    <input type="number" step="0.1" value={thresholds.sprint} onChange={(e) => setThresholds({ ...thresholds, sprint: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "none" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <label style={{ fontSize: "11px", color: "#bdc3c7" }}>HSR (km/h)</label>
+                    <input type="number" step="0.1" value={thresholds.hsr} onChange={(e) => setThresholds({ ...thresholds, hsr: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "none" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <label style={{ fontSize: "11px", color: "#bdc3c7" }}>Acel (m/s²)</label>
+                    <input type="number" step="0.1" value={thresholds.acel} onChange={(e) => setThresholds({ ...thresholds, acel: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "none" }} />
+                  </div>
+                </div>
+              </div>
+
               <button onClick={processDataClick} style={{ padding: "15px", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "5px", fontSize: "18px", fontWeight: "bold", cursor: "pointer", transition: "0.2s" }}>
                 ▶ Iniciar Simulador
               </button>
@@ -216,11 +243,9 @@ function App() {
 
   if (selectedPlayer && players[selectedPlayer]) {
     const historyToCurrentFrame = players[selectedPlayer].slice(0, frame + 1);
-
     if (historyToCurrentFrame.length > 0) {
       const lastData = historyToCurrentFrame[historyToCurrentFrame.length - 1];
       stats.currentVel = lastData ? (lastData.vel || 0) : 0;
-
       let isAcel = false; let isDecel = false;
       let cooldownAcel = 0; let cooldownDecel = 0;
       let isSprint = false;
@@ -230,26 +255,19 @@ function App() {
         if (frameData) {
           const v = frameData.vel || 0;
           const distFrame = v * 0.1;
-
           if (v > stats.maxVel) stats.maxVel = v;
           stats.distance += distFrame;
-
           if (frameData.zona === "Sprint" || frameData.zona === "HSR") stats.hsrDist += distFrame;
           if (frameData.zona === "Sprint" || frameData.zona === "HSR" || frameData.zona === "HMLD") stats.hmldDist += distFrame;
-
           if (frameData.zona === "Sprint" && !isSprint) { stats.sprints++; isSprint = true; }
           else if (frameData.zona !== "Sprint") { isSprint = false; }
 
           if (cooldownAcel > 0) cooldownAcel--;
           if (cooldownDecel > 0) cooldownDecel--;
-
-          if (frameData.fuerza === "Acel" && !isAcel && cooldownAcel === 0) {
-            stats.acels++; isAcel = true; cooldownAcel = 20;
-          } else if (frameData.fuerza !== "Acel") { isAcel = false; }
-
-          if (frameData.fuerza === "Decel" && !isDecel && cooldownDecel === 0) {
-            stats.decels++; isDecel = true; cooldownDecel = 20;
-          } else if (frameData.fuerza !== "Decel") { isDecel = false; }
+          if (frameData.fuerza === "Acel" && !isAcel && cooldownAcel === 0) { stats.acels++; isAcel = true; cooldownAcel = 20; }
+          else if (frameData.fuerza !== "Acel") { isAcel = false; }
+          if (frameData.fuerza === "Decel" && !isDecel && cooldownDecel === 0) { stats.decels++; isDecel = true; cooldownDecel = 20; }
+          else if (frameData.fuerza !== "Decel") { isDecel = false; }
         }
       }
     }
@@ -257,40 +275,18 @@ function App() {
 
   return (
     <div style={{ display: "flex", gap: "20px", padding: "20px", backgroundColor: "#2c3e50", minHeight: "100vh", fontFamily: "Arial, sans-serif", position: "relative" }}>
-
       {resumen && (
-        <button
-          onClick={() => setShowResumen(true)}
-          style={{
-            position: "fixed", bottom: "30px", right: "30px", zIndex: 1000,
-            padding: "15px 25px", backgroundColor: "#f1c40f", color: "#2c3e50",
-            border: "none", borderRadius: "50px", fontWeight: "bold", fontSize: "16px",
-            boxShadow: "0 4px 15px rgba(0,0,0,0.4)", cursor: "pointer"
-          }}
-        >
+        <button onClick={() => setShowResumen(true)} style={{ position: "fixed", bottom: "30px", right: "30px", zIndex: 1000, padding: "15px 25px", backgroundColor: "#f1c40f", color: "#2c3e50", border: "none", borderRadius: "50px", fontWeight: "bold", fontSize: "16px", boxShadow: "0 4px 15px rgba(0,0,0,0.4)", cursor: "pointer" }}>
           📊 Métricas Totales
         </button>
       )}
 
       {showResumen && resumen && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
-          backgroundColor: "rgba(0,0,0,0.85)", zIndex: 2000, display: "flex",
-          alignItems: "center", justifyContent: "center"
-        }}>
-          <div style={{
-            backgroundColor: "white", padding: "30px", borderRadius: "12px",
-            width: "90%", maxHeight: "85%", overflowY: "auto", position: "relative"
-          }}>
-            <button
-              onClick={() => setShowResumen(false)}
-              style={{ position: "absolute", top: "20px", right: "20px", cursor: "pointer", fontSize: "20px", border: "none", background: "none" }}
-            >
-              ✖
-            </button>
-
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.85)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ backgroundColor: "white", padding: "30px", borderRadius: "12px", width: "90%", maxHeight: "85%", overflowY: "auto", position: "relative" }}>
+            <button onClick={() => setShowResumen(false)} style={{ position: "absolute", top: "20px", right: "20px", cursor: "pointer", fontSize: "20px", border: "none", background: "none" }}>✖</button>
             <h2 style={{ color: "#2c3e50", marginBottom: "20px", textAlign: "center" }}>Estadísticas Finales del Partido</h2>
-
+            {/* Omito la tabla por brevedad visual, el código está intacto */}
             <table style={{ width: "100%", borderCollapse: "collapse", color: "#333" }}>
               <thead>
                 <tr style={{ backgroundColor: "#34495e", color: "white" }}>
@@ -337,16 +333,8 @@ function App() {
 
       <div style={{ flex: "0 0 1050px", display: "flex", flexDirection: "column" }}>
 
-        {/* PASAMOS LOS LÍMITES AL COMPONENTE PITCH Y EL ESTADO DE LAS LÍNEAS */}
-        <Pitch
-          players={players}
-          frame={frame}
-          visiblePlayers={visiblePlayers}
-          selectedPlayer={selectedPlayer}
-          playerRoles={playerRoles}
-          fieldLimits={fieldLimits}
-          showLines={showLines}
-        />
+        {/* PASAMOS LOS ROLES DINÁMICOS AL PITCH */}
+        <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} showLines={showLines} roles={roles} speed={speed} />
 
         <div style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "8px", marginTop: "10px", boxSizing: "border-box" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "15px", marginBottom: "15px" }}>
@@ -384,8 +372,8 @@ function App() {
               <div style={{ flex: 1, backgroundColor: "#fbd4d4", padding: "10px", borderRadius: "8px", border: "1px solid #e7a4a4", textAlign: "center" }}>
                 <h4 style={{ margin: "0 0 10px 0", color: "#b93434" }}>FUERZA</h4>
                 <div style={{ display: "flex", justifyContent: "space-around" }}>
-                  <div><div style={{ fontSize: "12px", color: "#666" }}>Acel (+3m/s²)</div><div style={{ fontSize: "20px", fontWeight: "bold" }}>{stats.acels}</div></div>
-                  <div><div style={{ fontSize: "12px", color: "#666" }}>Decel (-3m/s²)</div><div style={{ fontSize: "20px", fontWeight: "bold" }}>{stats.decels}</div></div>
+                  <div><div style={{ fontSize: "12px", color: "#666" }}>Acel (+{activeConfig ? activeConfig.u_acel : 3}m/s²)</div><div style={{ fontSize: "20px", fontWeight: "bold" }}>{stats.acels}</div></div>
+                  <div><div style={{ fontSize: "12px", color: "#666" }}>Decel (-{activeConfig ? activeConfig.u_acel : 3}m/s²)</div><div style={{ fontSize: "20px", fontWeight: "bold" }}>{stats.decels}</div></div>
                 </div>
               </div>
 
@@ -393,7 +381,7 @@ function App() {
                 <h4 style={{ margin: "0 0 10px 0", color: "#b87d21" }}>RESISTENCIA</h4>
                 <div style={{ display: "flex", justifyContent: "space-around" }}>
                   <div><div style={{ fontSize: "12px", color: "#666" }}>Dist. Total</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.distance.toFixed(0)}m</div></div>
-                  <div><div style={{ fontSize: "12px", color: "#666" }}>HSR (&gt;21km/h)</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.hsrDist.toFixed(0)}m</div></div>
+                  <div><div style={{ fontSize: "12px", color: "#666" }}>HSR (&gt;{activeConfig ? (activeConfig.u_hsr * 3.6).toFixed(1) : 21}km/h)</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.hsrDist.toFixed(0)}m</div></div>
                   <div><div style={{ fontSize: "12px", color: "#666" }}>HMLD (&gt;3m/s)</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.hmldDist.toFixed(0)}m</div></div>
                 </div>
               </div>
@@ -402,7 +390,7 @@ function App() {
                 <h4 style={{ margin: "0 0 10px 0", color: "#b1983c" }}>VELOCIDAD</h4>
                 <div style={{ display: "flex", justifyContent: "space-around" }}>
                   <div><div style={{ fontSize: "12px", color: "#666" }}>Vel. Máxima</div><div style={{ fontSize: "18px", fontWeight: "bold", color: "red" }}>{stats.maxVel.toFixed(2)} m/s</div></div>
-                  <div><div style={{ fontSize: "12px", color: "#666" }}>Nº Sprints</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.sprints}</div></div>
+                  <div><div style={{ fontSize: "12px", color: "#666" }}>Sprints (&gt;{activeConfig ? (activeConfig.u_sprint * 3.6).toFixed(1) : 24}km/h)</div><div style={{ fontSize: "18px", fontWeight: "bold" }}>{stats.sprints}</div></div>
                 </div>
               </div>
             </div>
@@ -410,38 +398,75 @@ function App() {
         </div>
       </div>
 
-      <div style={{ flex: 1, backgroundColor: "#ecf0f1", padding: "20px", borderRadius: "8px", boxShadow: "0 4px 8px rgba(0,0,0,0.2)" }}>
+      <div style={{ flex: 1, backgroundColor: "#ecf0f1", padding: "20px", borderRadius: "8px", boxShadow: "0 4px 8px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column" }}>
         <h3 style={{ borderBottom: "2px solid #bdc3c7", paddingBottom: "10px", marginTop: 0, color: "#2c3e50" }}>Gestión Táctica</h3>
-        <p style={{ fontSize: "13px", color: "#7f8c8d", marginBottom: "15px" }}>Asigna posiciones para sacar a los jugadores al campo o envíalos al banquillo.</p>
 
-        {/* --- NUEVO CHECKBOX DE LÍNEAS --- */}
+        {/* CREADOR DE POSICIONES */}
+        <div style={{ marginBottom: "20px", padding: "15px", backgroundColor: "#fff", borderRadius: "8px", border: "1px solid #bdc3c7" }}>
+          <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#34495e" }}>Crear Nueva Línea/Posición</h4>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <input
+              type="text"
+              placeholder="Ej. Pivote"
+              value={newRoleName}
+              onChange={e => setNewRoleName(e.target.value)}
+              style={{ flex: 1, padding: "8px", borderRadius: "4px", border: "1px solid #ccc" }}
+            />
+            <input
+              type="color"
+              value={newRoleColor}
+              onChange={e => setNewRoleColor(e.target.value)}
+              style={{ width: "40px", height: "34px", padding: "0", border: "none", cursor: "pointer" }}
+            />
+            <button
+              onClick={handleAddRole}
+              style={{ backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "4px", padding: "0 15px", cursor: "pointer", fontWeight: "bold" }}
+            >
+              +
+            </button>
+          </div>
+
+          {/* LISTA DE POSICIONES ACTIVAS CON OPCIÓN A BORRAR */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
+            {roles.map(r => (
+              <div key={`badge-${r.id}`} style={{ display: "flex", alignItems: "center", backgroundColor: r.color, color: ["#f1c40f", "#ffffff"].includes(r.color.toLowerCase()) ? "black" : "white", padding: "4px 8px", borderRadius: "20px", fontSize: "12px", fontWeight: "bold" }}>
+                {r.name}
+                {!r.isDefault && (
+                  <span onClick={() => handleDeleteRole(r.id)} style={{ marginLeft: "6px", cursor: "pointer", fontWeight: "bold", fontSize: "14px" }}>&times;</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div style={{ marginBottom: "20px", padding: "10px", backgroundColor: "#fff", borderRadius: "5px", border: "1px solid #bdc3c7", display: "flex", alignItems: "center", gap: "10px" }}>
-          <input
-            type="checkbox"
-            id="lines-toggle"
-            checked={showLines}
-            onChange={(e) => setShowLines(e.target.checked)}
-            style={{ width: "18px", height: "18px", cursor: "pointer" }}
-          />
+          <input type="checkbox" id="lines-toggle" checked={showLines} onChange={(e) => setShowLines(e.target.checked)} style={{ width: "18px", height: "18px", cursor: "pointer" }} />
           <label htmlFor="lines-toggle" style={{ fontWeight: "bold", cursor: "pointer", color: "#2c3e50" }}>
             Unir líneas por posición
           </label>
         </div>
-        {/* ------------------------------- */}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto", maxHeight: "calc(100vh - 170px)" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto", flex: 1 }}>
           {Object.keys(players).map(dev => {
             const currentRole = playerRoles[dev] || "Banquillo";
             const isPlaying = currentRole !== "Banquillo";
 
+            // Buscar el color del rol actual para la barra lateral izquierda
+            const roleObj = roles.find(r => r.id === currentRole);
+            const borderColor = roleObj ? roleObj.color : "#7f8c8d";
+
             return (
-              <div key={`role-${dev}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isPlaying ? "#fff" : "#e0e0e0", padding: "10px", borderRadius: "5px", borderLeft: isPlaying ? "4px solid #27ae60" : "4px solid #7f8c8d", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+              <div key={`role-${dev}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isPlaying ? "#fff" : "#e0e0e0", padding: "10px", borderRadius: "5px", borderLeft: `4px solid ${borderColor}`, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
                 <span style={{ fontWeight: "bold", color: isPlaying ? "#2c3e50" : "#7f8c8d" }}>Dorsal {dev}</span>
-                <select value={currentRole} onChange={(e) => handleRoleChange(dev, e.target.value)} style={{ padding: "5px", borderRadius: "4px", border: "1px solid #bdc3c7", cursor: "pointer", fontWeight: "bold" }}>
-                  <option value="Banquillo">Banquillo ⚫</option>
-                  <option value="Defensa">Defensa 🔵</option>
-                  <option value="Medio">Medio 🟡</option>
-                  <option value="Delantero">Delantero 🔴</option>
+                <select
+                  value={currentRole}
+                  onChange={(e) => handleRoleChange(dev, e.target.value)}
+                  style={{ padding: "5px", borderRadius: "4px", border: "1px solid #bdc3c7", cursor: "pointer", fontWeight: "bold" }}
+                >
+                  {/* GENERACIÓN DINÁMICA DE LAS OPCIONES */}
+                  {roles.map(r => (
+                    <option key={`opt-${r.id}`} value={r.id}>{r.name}</option>
+                  ))}
                 </select>
               </div>
             );

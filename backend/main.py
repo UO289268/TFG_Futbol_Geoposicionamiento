@@ -38,14 +38,22 @@ def root():
 @app.post("/upload")
 async def upload_excel(
     file: UploadFile = File(...),
-    field_id: str = Form(""), # Recibimos el campo seleccionado desde React
+    field_id: str = Form(""), 
     start_h1: str = Form(""),
     end_h1: str = Form(""),
     start_h2: str = Form(""),
-    end_h2: str = Form("")
+    end_h2: str = Form(""),
+    # --- NUEVOS UMBRALES DINÁMICOS ---
+    u_sprint: float = Form(24.0), # km/h
+    u_hsr: float = Form(21.0),    # km/h
+    u_acel: float = Form(3.0)     # m/s2
 ):
     global datos_partido
     try:
+        # Convertimos km/h a m/s para los cálculos internos del GPS
+        ms_sprint = u_sprint / 3.6
+        ms_hsr = u_hsr / 3.6
+
         # 1. Buscar los límites del campo seleccionado
         campos = cargar_campos()
         campo_select = next((c for c in campos if c["id"] == field_id), None)
@@ -113,8 +121,9 @@ async def upload_excel(
                 distancia = (pdf['vel'].fillna(0) * 0.1).sum()
                 v_max = pdf['vel'].max()
                 
-                sprints = ((pdf['vel'] > 6.66) & (pdf['vel'].shift(1) <= 6.66)).sum()
-                acels = ((pdf['acc'] > 3.0) & (pdf['acc'].shift(1) <= 3.0)).sum()
+                # AHORA USA LOS UMBRALES PERSONALIZADOS
+                sprints = ((pdf['vel'] > ms_sprint) & (pdf['vel'].shift(1) <= ms_sprint)).sum()
+                acels = ((pdf['acc'] > u_acel) & (pdf['acc'].shift(1) <= u_acel)).sum()
                 
                 return {
                     "dist": int(distancia),
@@ -139,15 +148,35 @@ async def upload_excel(
                     lista_jugador.append(None)
                 else:
                     v, a = row['vel'], row['acc'] if not pd.isna(row['acc']) else 0
+                    
+                    # CLASIFICACIÓN DE ZONAS DINÁMICA
+                    zona = "Trote"
+                    if v > ms_sprint: zona = "Sprint"
+                    elif v > ms_hsr: zona = "HSR"
+                    elif v > 3.0: zona = "HMLD"
+                    
+                    fuerza = "Normal"
+                    if a > u_acel: fuerza = "Acel"
+                    elif a < -u_acel: fuerza = "Decel"
+
                     lista_jugador.append({
                         "lat": row['lat'], "lon": row['lon'], "vel": v, "acc": a,
-                        "zona": "Sprint" if v > 6.66 else "HSR" if v > 5.83 else "HMLD" if v > 3.0 else "Trote",
-                        "fuerza": "Acel" if a > 3.0 else "Decel" if a < -3.0 else "Normal"
+                        "zona": zona,
+                        "fuerza": fuerza
                     })
             players_dict[str(dev)] = lista_jugador
 
-        # Añadimos los field_limits al objeto que viaja a React
-        datos_partido = {"players": players_dict, "resumen": resumen_stats, "field_limits": field_limits}
+        # Añadimos los field_limits y la configuración al objeto que viaja a React
+        datos_partido = {
+            "players": players_dict, 
+            "resumen": resumen_stats, 
+            "field_limits": field_limits,
+            "config": {
+                "u_sprint": ms_sprint, 
+                "u_hsr": ms_hsr, 
+                "u_acel": u_acel
+            }
+        }
         return {"status": "success"}
 
     except Exception as e:

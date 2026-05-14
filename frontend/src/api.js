@@ -11,18 +11,25 @@ export async function getFrames() {
     return await response.json();
 }
 
-export async function uploadExcel(file, times, fieldId) {
+export async function uploadExcel(file, times, fieldId, thresholds) {
     const formData = new FormData();
     formData.append("file", file);
 
-    // ¡AQUÍ ESTÁ LA CLAVE! Añadimos el ID del campo seleccionado
+    // Añadimos el ID del campo seleccionado
     formData.append("field_id", fieldId || "");
 
-    // Añadimos los tiempos al formulario que viaja al backend
+    // Añadimos los tiempos al formulario
     formData.append("start_h1", times.start_h1 || "");
     formData.append("end_h1", times.end_h1 || "");
     formData.append("start_h2", times.start_h2 || "");
     formData.append("end_h2", times.end_h2 || "");
+
+    // --- NUEVOS UMBRALES DINÁMICOS ---
+    if (thresholds) {
+        formData.append("u_sprint", thresholds.sprint);
+        formData.append("u_hsr", thresholds.hsr);
+        formData.append("u_acel", thresholds.acel);
+    }
 
     const response = await fetch(`${API_URL}/upload`, {
         method: "POST",
