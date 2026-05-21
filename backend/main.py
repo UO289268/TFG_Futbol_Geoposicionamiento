@@ -4,6 +4,7 @@ import pandas as pd
 import io
 import json
 import os
+import uuid
 
 app = FastAPI()
 
@@ -17,8 +18,12 @@ app.add_middleware(
 
 datos_partido = None
 
-# --- LÓGICA DE CARGA DE CAMPOS ---
+# --- DIRECTORIOS DE DATOS ---
 CAMPOS_FILE = "data/campos.json"
+MATCHES_DIR = "data/matches"
+
+# Crear la carpeta de partidos si no existe
+os.makedirs(MATCHES_DIR, exist_ok=True)
 
 def cargar_campos():
     if os.path.exists(CAMPOS_FILE):
@@ -29,7 +34,36 @@ def cargar_campos():
 @app.get("/fields")
 def get_fields():
     return cargar_campos()
-# ---------------------------------
+
+# --- NUEVO: GESTIÓN DE PARTIDOS GUARDADOS ---
+@app.get("/matches")
+def get_saved_matches():
+    matches = []
+    for filename in os.listdir(MATCHES_DIR):
+        if filename.endswith(".json"):
+            try:
+                with open(os.path.join(MATCHES_DIR, filename), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "metadata" in data:
+                        matches.append(data["metadata"])
+            except:
+                pass
+    # Ordenar por fecha de creación (los más nuevos primero)
+    matches.sort(key=lambda x: x.get("id", ""), reverse=True)
+    return matches
+
+@app.get("/matches/{match_id}")
+def load_match(match_id: str):
+    global datos_partido
+    path = os.path.join(MATCHES_DIR, f"{match_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Partido no encontrado")
+    
+    with open(path, "r", encoding="utf-8") as f:
+        datos_partido = json.load(f)
+    
+    return datos_partido
+# ---------------------------------------------
 
 @app.get("/")
 def root():
@@ -38,6 +72,7 @@ def root():
 @app.post("/upload")
 async def upload_excel(
     file: UploadFile = File(...),
+    match_name: str = Form("Partido sin nombre"), # NUEVO: Nombre del partido
     field_id: str = Form(""), 
     start_h1: str = Form(""),
     end_h1: str = Form(""),
@@ -166,8 +201,17 @@ async def upload_excel(
                     })
             players_dict[str(dev)] = lista_jugador
 
-        # Añadimos los field_limits y la configuración al objeto que viaja a React
+        # --- NUEVO: GUARDAR EL PARTIDO EN DISCO ---
+        match_id = str(uuid.uuid4()) # ID único
+        
         datos_partido = {
+            "metadata": {
+                "id": match_id,
+                "name": match_name,
+                "filename": file.filename,
+                "date": fecha_str,
+                "field": campo_select["nombre"] if campo_select else "Desconocido"
+            },
             "players": players_dict, 
             "resumen": resumen_stats, 
             "field_limits": field_limits,
@@ -177,7 +221,12 @@ async def upload_excel(
                 "u_acel": u_acel
             }
         }
-        return {"status": "success"}
+
+        # Guardamos en disco
+        with open(os.path.join(MATCHES_DIR, f"{match_id}.json"), "w", encoding="utf-8") as f:
+            json.dump(datos_partido, f)
+
+        return {"status": "success", "match_id": match_id}
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -185,5 +234,5 @@ async def upload_excel(
 @app.get("/frames")
 def get_frames():
     if datos_partido is None:
-        raise HTTPException(status_code=404, detail="No hay archivo")
+        raise HTTPException(status_code=404, detail="No hay archivo en memoria")
     return datos_partido

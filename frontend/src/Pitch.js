@@ -1,17 +1,50 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import fieldImg from "./field.png";
 
-const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed }) => {
-    if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
-    if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
+const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed, heatmapData }) => {
+    // 1. HOOKS SIEMPRE ARRIBA DEL TODO
+    const canvasRef = useRef(null);
 
     const widthPx = 1050;
     const heightPx = 680;
 
-    const { maxLat, minLat, minLon, maxLon } = fieldLimits;
+    // Protegemos la desestructuración para que no falle antes del "return" si fieldLimits es null
+    const safeLimits = fieldLimits || { maxLat: 1, minLat: 0, minLon: 0, maxLon: 1 };
+    const { maxLat, minLat, minLon, maxLon } = safeLimits;
 
     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
+
+    // --- LÓGICA DEL MAPA DE CALOR (CANVAS) ---
+    // Este Hook ahora es 100% seguro porque siempre se ejecuta.
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+
+        ctx.clearRect(0, 0, widthPx, heightPx);
+
+        if (!heatmapData || heatmapData.length === 0) return;
+
+        heatmapData.forEach(pos => {
+            const x = lonToPx(pos.lon);
+            const y = latToPx(pos.lat);
+
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, 22);
+            gradient.addColorStop(0, "rgba(255, 30, 0, 0.03)"); // Rojo intenso muy translúcido
+            gradient.addColorStop(1, "rgba(255, 30, 0, 0)");    // Borde invisible
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, 22, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [heatmapData, maxLat, minLat, minLon, maxLon]);
+
+    // 2. AHORA SÍ, LOS RETURNS TEMPRANOS (Después de los Hooks)
+    if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
+    if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
 
     // --- FÓRMULA DE HAVERSINE PARA DISTANCIAS REALES (METROS) ---
     const getDistance = (lat1, lon1, lat2, lon2) => {
@@ -26,12 +59,10 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         return R * c;
     };
 
-    // 💡 AJUSTE DINÁMICO DE TRANSICIÓN CSS
-    // Si la velocidad es mayor a 1, quitamos la animación para evitar descuadres.
-    // Si es x1, dejamos los 0.1s (100ms) que es el tiempo natural entre frames del GPS.
+    // --- AJUSTE DINÁMICO DE TRANSICIÓN CSS ---
     const transitionStyle = speed === 1 ? "all 0.1s linear" : "none";
 
-    // 1. Preparamos los grupos vacíos
+    // --- LÓGICA PARA LÍNEAS TÁCTICAS ---
     const roleGroups = {};
     if (roles) {
         roles.forEach(r => {
@@ -41,7 +72,6 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         });
     }
 
-    // 2. Agrupamos las coordenadas
     Object.entries(players).forEach(([dev, positions]) => {
         if (visiblePlayers && !visiblePlayers.includes(dev)) return;
         const pos = positions[frame];
@@ -59,7 +89,6 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         roleGroups[role].points.push(pxData);
     });
 
-    // Función para crear el trazado y distancias
     const createPolyline = (points, color, key) => {
         if (points.length < 2) return null;
 
@@ -87,7 +116,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                     textAnchor="middle"
                     style={{
                         textShadow: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000",
-                        transition: transitionStyle // Usamos la variable dinámica
+                        transition: transitionStyle
                     }}
                 >
                     {dist.toFixed(1)}m
@@ -104,7 +133,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                     strokeWidth="3"
                     strokeDasharray="8,5"
                     opacity="0.8"
-                    style={{ transition: transitionStyle }} // Usamos la variable dinámica
+                    style={{ transition: transitionStyle }}
                 />
                 {distancesText}
             </g>
@@ -124,7 +153,21 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                 overflow: "hidden"
             }}
         >
-            {/* CAPA SVG */}
+            {/* 💡 CAPA CANVAS PARA EL MAPA DE CALOR */}
+            <canvas
+                ref={canvasRef}
+                width={widthPx}
+                height={heightPx}
+                style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    zIndex: 2, // Por encima del césped, por debajo de los jugadores
+                    pointerEvents: "none"
+                }}
+            />
+
+            {/* CAPA SVG PARA LÍNEAS TÁCTICAS */}
             {showLines && (
                 <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}>
                     {Object.keys(roleGroups).map(roleId =>
@@ -169,7 +212,6 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                             fontFamily: "Arial, sans-serif",
                             boxShadow: isSelected ? "0px 0px 10px white" : "0px 3px 5px rgba(0,0,0,0.4)",
                             zIndex: 10,
-                            // 💡 Usamos la variable dinámica (background-color sí puede transicionar siempre)
                             transition: `background-color 0.3s ease, left ${speed === 1 ? '0.1s linear' : '0s'}, top ${speed === 1 ? '0.1s linear' : '0s'}`
                         }}
                         title={`Dorsal ${dev} - ${roleObj ? roleObj.name : "Banquillo"}`}

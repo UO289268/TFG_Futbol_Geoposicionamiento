@@ -1,30 +1,27 @@
 const API_URL = "http://127.0.0.1:8000";
 
+// Pedir el partido que está actualmente activo en memoria
 export async function getFrames() {
     const response = await fetch(`${API_URL}/frames`);
-
     if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Error al obtener los datos");
     }
-
     return await response.json();
 }
 
-export async function uploadExcel(file, times, fieldId, thresholds) {
+// Subir y procesar un nuevo Excel
+export async function uploadExcel(file, matchName, times, fieldId, thresholds) {
     const formData = new FormData();
     formData.append("file", file);
-
-    // Añadimos el ID del campo seleccionado
+    formData.append("match_name", matchName || "Partido sin nombre");
     formData.append("field_id", fieldId || "");
 
-    // Añadimos los tiempos al formulario
     formData.append("start_h1", times.start_h1 || "");
     formData.append("end_h1", times.end_h1 || "");
     formData.append("start_h2", times.start_h2 || "");
     formData.append("end_h2", times.end_h2 || "");
 
-    // --- NUEVOS UMBRALES DINÁMICOS ---
     if (thresholds) {
         formData.append("u_sprint", thresholds.sprint);
         formData.append("u_hsr", thresholds.hsr);
@@ -40,6 +37,19 @@ export async function uploadExcel(file, times, fieldId, thresholds) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Error al subir el archivo Excel");
     }
+    return await response.json();
+}
 
+// --- NUEVO: OBTENER LISTA DE PARTIDOS GUARDADOS ---
+export async function getSavedMatches() {
+    const response = await fetch(`${API_URL}/matches`);
+    if (!response.ok) throw new Error("Error al obtener la lista de partidos");
+    return await response.json();
+}
+
+// --- NUEVO: CARGAR UN PARTIDO GUARDADO ---
+export async function loadSavedMatch(matchId) {
+    const response = await fetch(`${API_URL}/matches/${matchId}`);
+    if (!response.ok) throw new Error("Error al cargar el partido");
     return await response.json();
 }
