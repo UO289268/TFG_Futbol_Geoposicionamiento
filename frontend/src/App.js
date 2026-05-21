@@ -10,7 +10,6 @@ const DEFAULT_ROLES = [
 ];
 
 function App() {
-  // NUEVO: Control de pantallas ("menu", "new", "load", "simulator")
   const [appMode, setAppMode] = useState("menu");
 
   const [players, setPlayers] = useState({});
@@ -38,7 +37,6 @@ function App() {
   const [thresholds, setThresholds] = useState({ sprint: 24.0, hsr: 21.0, acel: 3.0 });
   const [activeConfig, setActiveConfig] = useState(null);
 
-  // Lista de partidos guardados
   const [savedMatches, setSavedMatches] = useState([]);
 
   const [roles, setRoles] = useState(DEFAULT_ROLES);
@@ -78,7 +76,7 @@ function App() {
       setPlayerRoles(initialRoles);
       setVisiblePlayers([]);
     }
-    setAppMode("simulator"); // Pasamos a la pantalla del campo
+    setAppMode("simulator");
   };
 
   useEffect(() => {
@@ -95,7 +93,6 @@ function App() {
 
   const handleTimeChange = (e) => setMatchTimes({ ...matchTimes, [e.target.name]: e.target.value });
 
-  // PROCESAR NUEVO PARTIDO
   const processDataClick = async () => {
     if (!matchName) return setError("Por favor, ponle un nombre al partido.");
     if (!selectedFile) return setError("Por favor, selecciona un archivo Excel primero.");
@@ -111,7 +108,6 @@ function App() {
     finally { setUploading(false); }
   };
 
-  // CARGAR PARTIDO DESDE MEMORIA
   const fetchMatchesList = async () => {
     try {
       const matches = await getSavedMatches();
@@ -129,9 +125,6 @@ function App() {
     finally { setUploading(false); }
   };
 
-  // ----------------------------------------------------
-  // GESTIÓN DE ROLES Y MAPA DE CALOR (Igual que antes)
-  // ----------------------------------------------------
   useEffect(() => {
     if (!players || maxFrames === 0 || !isPlaying || appMode !== "simulator") return;
     const interval = setInterval(() => { setFrame(f => (f + 1) % maxFrames); }, 100 / speed);
@@ -167,32 +160,26 @@ function App() {
     setRoles(roles.filter(r => r.id !== roleId));
   };
 
+  // --- LÓGICA DEL MAPA DE CALOR ACTUALIZADA PARA ACEPTAR 18 ZONAS ---
   const getHeatmapData = () => {
     if (heatmapMode === "none" || !players || Object.keys(players).length === 0) return [];
     let filteredPlayers = [];
     if (heatmapMode === "team") filteredPlayers = Object.keys(players).filter(dev => playerRoles[dev] !== "Banquillo");
     else if (heatmapMode === "role") filteredPlayers = Object.keys(players).filter(dev => playerRoles[dev] === selectedHeatRole);
-    else if (heatmapMode === "player" && selectedHeatPlayer) filteredPlayers = [selectedHeatPlayer];
+    else if ((heatmapMode === "player" || heatmapMode === "zones") && selectedHeatPlayer) filteredPlayers = [selectedHeatPlayer];
 
     return filteredPlayers.flatMap(dev => players[dev].slice(0, frame + 1).filter(p => p !== null));
   };
 
-  // --- RENDERIZADO CONDICIONAL DE PANTALLAS ---
-
-  // PANTALLA 1: MENÚ PRINCIPAL
   if (appMode === "menu") {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif" }}>
         <h1 style={{ fontSize: "48px", marginBottom: "50px" }}>TFG Analytics</h1>
         <div style={{ display: "flex", gap: "30px" }}>
-          <button
-            onClick={() => setAppMode("new")}
-            style={{ padding: "30px 40px", fontSize: "24px", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "15px", cursor: "pointer", boxShadow: "0 10px 20px rgba(0,0,0,0.3)", fontWeight: "bold" }}>
+          <button onClick={() => setAppMode("new")} style={{ padding: "30px 40px", fontSize: "24px", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "15px", cursor: "pointer", boxShadow: "0 10px 20px rgba(0,0,0,0.3)", fontWeight: "bold" }}>
             ➕ Procesar Nuevo Partido
           </button>
-          <button
-            onClick={fetchMatchesList}
-            style={{ padding: "30px 40px", fontSize: "24px", backgroundColor: "#2980b9", color: "white", border: "none", borderRadius: "15px", cursor: "pointer", boxShadow: "0 10px 20px rgba(0,0,0,0.3)", fontWeight: "bold" }}>
+          <button onClick={fetchMatchesList} style={{ padding: "30px 40px", fontSize: "24px", backgroundColor: "#2980b9", color: "white", border: "none", borderRadius: "15px", cursor: "pointer", boxShadow: "0 10px 20px rgba(0,0,0,0.3)", fontWeight: "bold" }}>
             📂 Cargar Partido Guardado
           </button>
         </div>
@@ -200,7 +187,6 @@ function App() {
     );
   }
 
-  // PANTALLA 2: CARGAR PARTIDO GUARDADO
   if (appMode === "load") {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif", padding: "20px" }}>
@@ -232,7 +218,6 @@ function App() {
     );
   }
 
-  // PANTALLA 3: PROCESAR NUEVO PARTIDO
   if (appMode === "new") {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#2c3e50", color: "white", fontFamily: "Arial, sans-serif", padding: "20px" }}>
@@ -247,7 +232,6 @@ function App() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
-
               <div style={{ backgroundColor: "#2c3e50", padding: "15px", borderRadius: "8px" }}>
                 <h4 style={{ margin: "0 0 10px 0", color: "#ecf0f1" }}>1. Nombre del Partido</h4>
                 <input type="text" placeholder="Ej: Jornada 1 vs Oviedo" value={matchName} onChange={e => setMatchName(e.target.value)} style={{ width: "100%", padding: "12px", borderRadius: "5px", border: "none", boxSizing: "border-box", fontSize: "16px" }} />
@@ -299,8 +283,6 @@ function App() {
     );
   }
 
-  // PANTALLA 4: SIMULADOR (appMode === "simulator")
-
   let stats = { currentVel: 0, maxVel: 0, distance: 0, sprints: 0, hsrDist: 0, hmldDist: 0, acels: 0, decels: 0 };
   if (selectedPlayer && players[selectedPlayer]) {
     const historyToCurrentFrame = players[selectedPlayer].slice(0, frame + 1);
@@ -335,10 +317,7 @@ function App() {
 
   return (
     <div style={{ display: "flex", gap: "20px", padding: "20px", backgroundColor: "#2c3e50", minHeight: "100vh", fontFamily: "Arial, sans-serif", position: "relative" }}>
-      {/* Botón de volver al menú en la esquina superior derecha */}
-      <button
-        onClick={() => setAppMode("menu")}
-        style={{ position: "absolute", top: "20px", right: "20px", zIndex: 1000, padding: "10px 20px", backgroundColor: "#e74c3c", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
+      <button onClick={() => setAppMode("menu")} style={{ position: "absolute", top: "20px", right: "20px", zIndex: 1000, padding: "10px 20px", backgroundColor: "#e74c3c", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
         ✖ Cerrar Partido
       </button>
 
@@ -399,7 +378,20 @@ function App() {
 
       <div style={{ flex: "0 0 1050px", display: "flex", flexDirection: "column", paddingTop: "30px" }}>
 
-        <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} showLines={showLines} roles={roles} speed={speed} heatmapData={getHeatmapData()} />
+        {/* PASAMOS heatmapMode y heatmapData AL PITCH */}
+        <Pitch
+          players={players}
+          frame={frame}
+          visiblePlayers={visiblePlayers}
+          selectedPlayer={selectedPlayer}
+          playerRoles={playerRoles}
+          fieldLimits={fieldLimits}
+          showLines={showLines}
+          roles={roles}
+          speed={speed}
+          heatmapMode={heatmapMode}
+          heatmapData={getHeatmapData()}
+        />
 
         <div style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "8px", marginTop: "10px", boxSizing: "border-box" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "15px", marginBottom: "15px" }}>
@@ -465,21 +457,23 @@ function App() {
 
       <div style={{ flex: 1, backgroundColor: "#ecf0f1", padding: "20px", borderRadius: "8px", boxShadow: "0 4px 8px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column", paddingTop: "30px" }}>
 
-        {/* --- MAPA DE CALOR --- */}
+        {/* --- MAPA DE CALOR CON LA NUEVA OPCIÓN DE ZONAS --- */}
         <div style={{ marginBottom: "20px", padding: "15px", backgroundColor: "#fff", borderRadius: "8px", border: "1px solid #bdc3c7" }}>
-          <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#34495e" }}>Visualizar Mapa de Calor</h4>
+          <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#34495e" }}>Visualizar Análisis Espacial</h4>
           <select value={heatmapMode} onChange={(e) => setHeatmapMode(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", marginBottom: heatmapMode !== "none" && heatmapMode !== "team" ? "10px" : "0", cursor: "pointer", fontWeight: "bold" }}>
             <option value="none">❌ Apagado</option>
-            <option value="team">🌍 Todo el Equipo</option>
-            <option value="role">👥 Por Línea / Posición</option>
-            <option value="player">👤 Jugador Individual</option>
+            <option value="team">🌍 Mancha: Todo el Equipo</option>
+            <option value="role">👥 Mancha: Por Línea / Posición</option>
+            <option value="player">👤 Mancha: Jugador Individual</option>
+            <option value="zones">🔢 18 Zonas: Jugador Individual</option>
           </select>
           {heatmapMode === "role" && (
             <select value={selectedHeatRole} onChange={(e) => setSelectedHeatRole(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", cursor: "pointer" }}>
               {roles.filter(r => r.id !== "Banquillo").map(r => <option key={`heat-role-${r.id}`} value={r.id}>{r.name}</option>)}
             </select>
           )}
-          {heatmapMode === "player" && (
+          {/* El selector de jugador aparece tanto para la mancha individual como para los cuadrantes */}
+          {(heatmapMode === "player" || heatmapMode === "zones") && (
             <select value={selectedHeatPlayer} onChange={(e) => setSelectedHeatPlayer(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", cursor: "pointer" }}>
               {Object.keys(players).map(dev => <option key={`heat-player-${dev}`} value={dev}>Dorsal {dev}</option>)}
             </select>

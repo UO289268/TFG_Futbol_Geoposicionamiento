@@ -1,22 +1,19 @@
 import React, { useEffect, useRef } from "react";
 import fieldImg from "./field.png";
 
-const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed, heatmapData }) => {
-    // 1. HOOKS SIEMPRE ARRIBA DEL TODO
+const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed, heatmapMode, heatmapData }) => {
     const canvasRef = useRef(null);
 
     const widthPx = 1050;
     const heightPx = 680;
 
-    // Protegemos la desestructuración para que no falle antes del "return" si fieldLimits es null
     const safeLimits = fieldLimits || { maxLat: 1, minLat: 0, minLon: 0, maxLon: 1 };
     const { maxLat, minLat, minLon, maxLon } = safeLimits;
 
     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
 
-    // --- LÓGICA DEL MAPA DE CALOR (CANVAS) ---
-    // Este Hook ahora es 100% seguro porque siempre se ejecuta.
+    // --- LÓGICA DEL MAPA DE CALOR (CANVAS - MANCHAS) ---
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -24,15 +21,16 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
 
         ctx.clearRect(0, 0, widthPx, heightPx);
 
-        if (!heatmapData || heatmapData.length === 0) return;
+        // Si estamos en modo ZONAS, no pintamos manchas
+        if (heatmapMode === "zones" || !heatmapData || heatmapData.length === 0) return;
 
         heatmapData.forEach(pos => {
             const x = lonToPx(pos.lon);
             const y = latToPx(pos.lat);
 
             const gradient = ctx.createRadialGradient(x, y, 0, x, y, 22);
-            gradient.addColorStop(0, "rgba(255, 30, 0, 0.03)"); // Rojo intenso muy translúcido
-            gradient.addColorStop(1, "rgba(255, 30, 0, 0)");    // Borde invisible
+            gradient.addColorStop(0, "rgba(255, 30, 0, 0.03)");
+            gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
 
             ctx.fillStyle = gradient;
             ctx.beginPath();
@@ -40,15 +38,13 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
             ctx.fill();
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [heatmapData, maxLat, minLat, minLon, maxLon]);
+    }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode]);
 
-    // 2. AHORA SÍ, LOS RETURNS TEMPRANOS (Después de los Hooks)
     if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
     if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
 
-    // --- FÓRMULA DE HAVERSINE PARA DISTANCIAS REALES (METROS) ---
     const getDistance = (lat1, lon1, lat2, lon2) => {
-        const R = 6371e3; // Radio de la Tierra en metros
+        const R = 6371e3;
         const rad = Math.PI / 180;
         const dLat = (lat2 - lat1) * rad;
         const dLon = (lon2 - lon1) * rad;
@@ -59,10 +55,8 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         return R * c;
     };
 
-    // --- AJUSTE DINÁMICO DE TRANSICIÓN CSS ---
     const transitionStyle = speed === 1 ? "all 0.1s linear" : "none";
 
-    // --- LÓGICA PARA LÍNEAS TÁCTICAS ---
     const roleGroups = {};
     if (roles) {
         roles.forEach(r => {
@@ -90,11 +84,24 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
     });
 
     const createPolyline = (points, color, key) => {
-        if (points.length < 2) return null;
+        if (points.length === 0) return null;
+
+        const sumX = points.reduce((acc, p) => acc + p.x, 0);
+        const sumY = points.reduce((acc, p) => acc + p.y, 0);
+        const centroidX = sumX / points.length;
+        const centroidY = sumY / points.length;
+
+        const centroidSvg = (
+            <g key={`${key}-centroid`}>
+                <circle cx={centroidX} cy={centroidY} r="8" fill="rgba(0,0,0,0.4)" stroke={color} strokeWidth="2" style={{ transition: transitionStyle }} />
+                <circle cx={centroidX} cy={centroidY} r="3" fill={color} style={{ transition: transitionStyle }} />
+            </g>
+        );
+
+        if (points.length < 2) return centroidSvg;
 
         const sortedPoints = [...points].sort((a, b) => a.y - b.y);
         const pointsString = sortedPoints.map(p => `${p.x},${p.y}`).join(" ");
-
         const distancesText = [];
 
         for (let i = 0; i < sortedPoints.length - 1; i++) {
@@ -136,8 +143,83 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                     style={{ transition: transitionStyle }}
                 />
                 {distancesText}
+                {centroidSvg}
             </g>
         );
+    };
+
+    // --- NUEVA LÓGICA: 18 ZONAS (CUADRANTES) ---
+    const renderZones = () => {
+        if (heatmapMode !== "zones" || !heatmapData || heatmapData.length === 0) return null;
+
+        const cols = 6;
+        const rows = 3;
+        const colW = widthPx / cols;
+        const rowH = heightPx / rows;
+
+        let zoneCounts = Array(18).fill(0);
+        let totalPoints = 0;
+
+        // 1. Contamos cuántas coordenadas caen en cada cuadrante
+        heatmapData.forEach(pos => {
+            const x = lonToPx(pos.lon);
+            const y = latToPx(pos.lat);
+
+            // Limitamos con Math.min/max para que no de error si un jugador pisa la línea de cal exacta
+            const col = Math.min(cols - 1, Math.max(0, Math.floor(x / colW)));
+            const row = Math.min(rows - 1, Math.max(0, Math.floor(y / rowH)));
+
+            // Cálculo del índice (0 a 17). Según tu imagen el orden es Top-Bottom, Left-Right.
+            // Col 1: 0, 1, 2 | Col 2: 3, 4, 5...
+            const zoneIndex = (col * rows) + row;
+            zoneCounts[zoneIndex]++;
+            totalPoints++;
+        });
+
+        // 2. Dibujamos los rectángulos
+        const zonesSvg = [];
+        for (let c = 0; c < cols; c++) {
+            for (let r = 0; r < rows; r++) {
+                const index = (c * rows) + r;
+                const count = zoneCounts[index];
+                const percentage = totalPoints > 0 ? (count / totalPoints) * 100 : 0;
+
+                // Color dinámico: Si el % es alto, se vuelve rojo oscuro. Si es 0, es transparente.
+                // Ajustamos para que un 20% ya se vea muy rojo (los jugadores no se reparten al 100% igual).
+                const opacity = Math.min(0.8, percentage / 25);
+                const bgColor = `rgba(231, 76, 60, ${opacity})`;
+
+                zonesSvg.push(
+                    <g key={`quadrant-${index}`}>
+                        <rect
+                            x={c * colW}
+                            y={r * rowH}
+                            width={colW}
+                            height={rowH}
+                            fill={bgColor}
+                            stroke="rgba(255,255,255,0.4)"
+                            strokeWidth="1"
+                            strokeDasharray="5,5"
+                        />
+                        {percentage > 0 && (
+                            <text
+                                x={(c * colW) + (colW / 2)}
+                                y={(r * rowH) + (rowH / 2)}
+                                fill="white"
+                                fontSize="22"
+                                fontWeight="bold"
+                                textAnchor="middle"
+                                alignmentBaseline="middle"
+                                style={{ textShadow: "2px 2px 4px rgba(0,0,0,0.8)" }}
+                            >
+                                {percentage.toFixed(1)}%
+                            </text>
+                        )}
+                    </g>
+                );
+            }
+        }
+        return zonesSvg;
     };
 
     return (
@@ -153,7 +235,6 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                 overflow: "hidden"
             }}
         >
-            {/* 💡 CAPA CANVAS PARA EL MAPA DE CALOR */}
             <canvas
                 ref={canvasRef}
                 width={widthPx}
@@ -162,21 +243,22 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                     position: "absolute",
                     top: 0,
                     left: 0,
-                    zIndex: 2, // Por encima del césped, por debajo de los jugadores
-                    pointerEvents: "none"
+                    zIndex: 2,
+                    pointerEvents: "none",
+                    display: heatmapMode === "zones" ? "none" : "block" // Ocultamos el canvas si estamos en modo Zonas
                 }}
             />
 
-            {/* CAPA SVG PARA LÍNEAS TÁCTICAS */}
-            {showLines && (
-                <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}>
-                    {Object.keys(roleGroups).map(roleId =>
-                        createPolyline(roleGroups[roleId].points, roleGroups[roleId].color, `line-${roleId}`)
-                    )}
-                </svg>
-            )}
+            <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}>
+                {/* DIBUJO DE LAS 18 ZONAS (Si está activado) */}
+                {renderZones()}
 
-            {/* JUGADORES */}
+                {/* DIBUJO DE LAS LÍNEAS TÁCTICAS */}
+                {showLines && Object.keys(roleGroups).map(roleId =>
+                    createPolyline(roleGroups[roleId].points, roleGroups[roleId].color, `line-${roleId}`)
+                )}
+            </svg>
+
             {Object.entries(players).map(([dev, positions]) => {
                 if (visiblePlayers && !visiblePlayers.includes(dev)) return null;
 
