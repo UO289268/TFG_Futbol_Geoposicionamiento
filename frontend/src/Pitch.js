@@ -13,7 +13,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
 
-    // --- LÓGICA DEL MAPA DE CALOR (CANVAS - MANCHAS) ---
+    // --- LÓGICA DEL MAPA DE CALOR ULTRA-OPTIMIZADA ---
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -21,22 +21,32 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
 
         ctx.clearRect(0, 0, widthPx, heightPx);
 
-        // Si estamos en modo ZONAS, no pintamos manchas
         if (heatmapMode === "zones" || !heatmapData || heatmapData.length === 0) return;
 
+        // 💡 OPTIMIZACIÓN EXTREMA: Creamos un "Sello" (Offscreen Canvas)
+        const brushRadius = 25;
+        const brushCanvas = document.createElement("canvas");
+        brushCanvas.width = brushRadius * 2;
+        brushCanvas.height = brushRadius * 2;
+        const bCtx = brushCanvas.getContext("2d");
+
+        // Dibujamos el degradado solo 1 vez en este mini-lienzo invisible
+        const gradient = bCtx.createRadialGradient(brushRadius, brushRadius, 0, brushRadius, brushRadius, brushRadius);
+        gradient.addColorStop(0, "rgba(255, 30, 0, 0.025)"); // Ligeramente más suave porque ahora pintamos más rápido
+        gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
+        bCtx.fillStyle = gradient;
+        bCtx.beginPath();
+        bCtx.arc(brushRadius, brushRadius, brushRadius, 0, Math.PI * 2);
+        bCtx.fill();
+
+        // 💡 "Estampamos" el sello miles de veces usando GPU directamente
         heatmapData.forEach(pos => {
             const x = lonToPx(pos.lon);
             const y = latToPx(pos.lat);
-
-            const gradient = ctx.createRadialGradient(x, y, 0, x, y, 22);
-            gradient.addColorStop(0, "rgba(255, 30, 0, 0.03)");
-            gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
-
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(x, y, 22, 0, Math.PI * 2);
-            ctx.fill();
+            // drawImage es infinitamente más rápido que arc() y createRadialGradient()
+            ctx.drawImage(brushCanvas, x - brushRadius, y - brushRadius);
         });
+
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode]);
 
@@ -148,7 +158,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         );
     };
 
-    // --- NUEVA LÓGICA: 18 ZONAS (CUADRANTES) ---
+    // --- LÓGICA DE 18 ZONAS (CUADRANTES) ---
     const renderZones = () => {
         if (heatmapMode !== "zones" || !heatmapData || heatmapData.length === 0) return null;
 
@@ -160,23 +170,18 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         let zoneCounts = Array(18).fill(0);
         let totalPoints = 0;
 
-        // 1. Contamos cuántas coordenadas caen en cada cuadrante
         heatmapData.forEach(pos => {
             const x = lonToPx(pos.lon);
             const y = latToPx(pos.lat);
 
-            // Limitamos con Math.min/max para que no de error si un jugador pisa la línea de cal exacta
             const col = Math.min(cols - 1, Math.max(0, Math.floor(x / colW)));
             const row = Math.min(rows - 1, Math.max(0, Math.floor(y / rowH)));
 
-            // Cálculo del índice (0 a 17). Según tu imagen el orden es Top-Bottom, Left-Right.
-            // Col 1: 0, 1, 2 | Col 2: 3, 4, 5...
             const zoneIndex = (col * rows) + row;
             zoneCounts[zoneIndex]++;
             totalPoints++;
         });
 
-        // 2. Dibujamos los rectángulos
         const zonesSvg = [];
         for (let c = 0; c < cols; c++) {
             for (let r = 0; r < rows; r++) {
@@ -184,8 +189,6 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                 const count = zoneCounts[index];
                 const percentage = totalPoints > 0 ? (count / totalPoints) * 100 : 0;
 
-                // Color dinámico: Si el % es alto, se vuelve rojo oscuro. Si es 0, es transparente.
-                // Ajustamos para que un 20% ya se vea muy rojo (los jugadores no se reparten al 100% igual).
                 const opacity = Math.min(0.8, percentage / 25);
                 const bgColor = `rgba(231, 76, 60, ${opacity})`;
 
@@ -245,15 +248,13 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
                     left: 0,
                     zIndex: 2,
                     pointerEvents: "none",
-                    display: heatmapMode === "zones" ? "none" : "block" // Ocultamos el canvas si estamos en modo Zonas
+                    display: heatmapMode === "zones" ? "none" : "block"
                 }}
             />
 
             <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, zIndex: 5, pointerEvents: "none" }}>
-                {/* DIBUJO DE LAS 18 ZONAS (Si está activado) */}
                 {renderZones()}
 
-                {/* DIBUJO DE LAS LÍNEAS TÁCTICAS */}
                 {showLines && Object.keys(roleGroups).map(roleId =>
                     createPolyline(roleGroups[roleId].points, roleGroups[roleId].color, `line-${roleId}`)
                 )}

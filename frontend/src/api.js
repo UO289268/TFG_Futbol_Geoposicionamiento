@@ -53,3 +53,12 @@ export async function loadSavedMatch(matchId) {
     if (!response.ok) throw new Error("Error al cargar el partido");
     return await response.json();
 }
+
+// --- NUEVO: ELIMINAR UN PARTIDO GUARDADO ---
+export async function deleteSavedMatch(matchId) {
+    const response = await fetch(`${API_URL}/matches/${matchId}`, {
+        method: "DELETE",
+    });
+    if (!response.ok) throw new Error("Error al eliminar el partido");
+    return await response.json();
+}
