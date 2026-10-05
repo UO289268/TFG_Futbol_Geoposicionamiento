@@ -62,3 +62,21 @@ export async function deleteSavedMatch(matchId) {
     if (!response.ok) throw new Error("Error al eliminar el partido");
     return await response.json();
 }
+
+// --- NUEVO: AUTENTICACIÓN ---
+export async function loginUser(email, password) {
+    const formData = new FormData();
+    formData.append("email", email);
+    formData.append("password", password);
+
+    const response = await fetch(`${API_URL}/login`, {
+        method: "POST",
+        body: formData,
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Error al iniciar sesión");
+    }
+    return await response.json();
+}

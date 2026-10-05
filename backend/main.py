@@ -1,10 +1,21 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 import pandas as pd
 import io
 import json
 import os
 import uuid
+import bcrypt
+import jwt
+import datetime
+
+# --- IMPORTACIONES DE TUS NUEVOS ARCHIVOS ---
+import models
+from database import engine, get_db
+
+# Crea las tablas en la base de datos local si no existen
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
@@ -16,12 +27,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Constantes para la encriptación de Tokens JWT
+SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
+ALGORITHM = "HS256"
+
 datos_partido = None
 
 # --- DIRECTORIOS ---
 CAMPOS_FILE = "data/campos.json"
 MATCHES_DIR = "data/matches"
 os.makedirs(MATCHES_DIR, exist_ok=True)
+
+
+# ==========================================
+#        NUEVOS ENDPOINTS (USUARIOS Y LOGIN)
+# ==========================================
+
+@app.post("/register")
+def register_user(
+    email: str = Form(...), 
+    password: str = Form(...), 
+    name: str = Form(...), 
+    role: str = Form("jugador"), 
+    db: Session = Depends(get_db)
+):
+    # Comprobar si el correo ya existe
+    db_user = db.query(models.User).filter(models.User.email == email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    
+    # Hashear contraseña y guardar en la Base de Datos
+    hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    new_user = models.User(email=email, hashed_password=hashed_pw, name=name, role=role)
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "Usuario creado con éxito", "user_id": new_user.id}
+
+@app.post("/login")
+def login(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == email).first()
+    
+    # Verificar si el usuario existe y si la contraseña coincide
+    if not user or not bcrypt.checkpw(password.encode('utf-8'), user.hashed_password.encode('utf-8')):
+        raise HTTPException(status_code=400, detail="Email o contraseña incorrectos")
+    
+    # Generar Token JWT válido por 24 horas
+    payload = {
+        "sub": user.email,
+        "id": user.id,
+        "role": user.role,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    
+    return {
+        "access_token": token, 
+        "token_type": "bearer",
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
+    }
+
+
+# ==========================================
+#        ENDPOINTS ANTIGUOS (SIMULADOR Y EXCEL)
+# ==========================================
 
 def cargar_campos():
     if os.path.exists(CAMPOS_FILE):
@@ -57,16 +128,16 @@ def load_match(match_id: str):
         datos_partido = json.load(f)
     return datos_partido
 
-    @app.delete("/matches/{match_id}")
-    def delete_match(match_id: str):
-        path = os.path.join(MATCHES_DIR, f"{match_id}.json")
-        if not os.path.exists(path):
-            raise HTTPException(status_code=404, detail="Partido no encontrado")
-        try:
-            os.remove(path)
-            return {"status": "success", "message": "Partido eliminado"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+@app.delete("/matches/{match_id}")
+def delete_match(match_id: str):
+    path = os.path.join(MATCHES_DIR, f"{match_id}.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Partido no encontrado")
+    try:
+        os.remove(path)
+        return {"status": "success", "message": "Partido eliminado"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload")
 async def upload_excel(
@@ -106,7 +177,6 @@ async def upload_excel(
         df['timestamp'] = pd.to_datetime(df['local_time']).dt.floor('100ms')
         fecha_str = str(df['timestamp'].dt.date.iloc[0])
 
-        # LÓGICA DE RECORTE
         if start_h1 and end_h1 and start_h2 and end_h2:
             t_start_h1 = pd.to_datetime(f"{fecha_str} {start_h1}")
             t_end_h1 = pd.to_datetime(f"{fecha_str} {end_h1}")
@@ -131,7 +201,6 @@ async def upload_excel(
             df_jugador = df[df['DEV'] == dev].drop_duplicates(subset=['timestamp']).set_index('timestamp')
             df_sincronizado = df_jugador.reindex(rango_global)
             
-            # Filtro suavizado
             df_sincronizado['vel_suavizada'] = df_sincronizado['vel'].rolling(window=3, min_periods=1).mean()
             df_sincronizado['acc'] = df_sincronizado['vel_suavizada'].diff(periods=5) / 0.5
             df_sincronizado['acc'] = df_sincronizado['acc'].rolling(window=5, min_periods=1).mean()
@@ -174,7 +243,6 @@ async def upload_excel(
                     })
             players_dict[str(dev)] = lista_jugador
 
-        # GUARDAMOS EL PARTIDO EN DISCO
         match_id = str(uuid.uuid4())
         datos_partido = {
             "metadata": {"id": match_id, "name": match_name, "filename": file.filename, "date": fecha_str, "field": campo_select["nombre"] if campo_select else "Campo"},
