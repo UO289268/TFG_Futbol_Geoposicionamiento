@@ -104,19 +104,11 @@ def cargar_campos():
 def get_fields():
     return cargar_campos()
 
-@app.get("/matches")
-def get_saved_matches():
-    matches = []
-    for filename in os.listdir(MATCHES_DIR):
-        if filename.endswith(".json"):
-            try:
-                with open(os.path.join(MATCHES_DIR, filename), "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if "metadata" in data:
-                        matches.append(data["metadata"])
-            except: pass
-    matches.sort(key=lambda x: x.get("date", ""), reverse=True)
-    return matches
+@app.get("/matches/club/{club_id}")
+def get_saved_matches(club_id: int, db: Session = Depends(get_db)):
+    matches = db.query(models.Match).filter(models.Match.club_id == club_id).order_by(models.Match.date.desc()).all()
+    # Devolvemos el mismo formato que esperaba tu React
+    return [{"id": m.id, "name": m.name, "date": m.date, "field": m.field, "filename": m.filename} for m in matches]
 
 @app.get("/matches/{match_id}")
 def load_match(match_id: str):
@@ -129,15 +121,19 @@ def load_match(match_id: str):
     return datos_partido
 
 @app.delete("/matches/{match_id}")
-def delete_match(match_id: str):
+def delete_match(match_id: str, db: Session = Depends(get_db)):
+    # 1. Borrar de la base de datos
+    db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
+    if db_match:
+        db.delete(db_match)
+        db.commit()
+    
+    # 2. Borrar archivo físico
     path = os.path.join(MATCHES_DIR, f"{match_id}.json")
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Partido no encontrado")
-    try:
+    if os.path.exists(path):
         os.remove(path)
-        return {"status": "success", "message": "Partido eliminado"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        
+    return {"status": "success", "message": "Partido eliminado"}
 
 @app.post("/upload")
 async def upload_excel(
@@ -150,7 +146,9 @@ async def upload_excel(
     end_h2: str = Form(""),
     u_sprint: float = Form(24.0),
     u_hsr: float = Form(21.0),
-    u_acel: float = Form(3.0)
+    u_acel: float = Form(3.0),
+    club_id: int = Form(...),
+    db: Session = Depends(get_db)
 ):
     global datos_partido
     try:
@@ -173,7 +171,6 @@ async def upload_excel(
             raise ValueError(f"Faltan columnas. Se requieren: {columnas_req}")
 
         df['vel'] = df['vel'] / 3.6
-
         df['timestamp'] = pd.to_datetime(df['local_time']).dt.floor('100ms')
         fecha_str = str(df['timestamp'].dt.date.iloc[0])
 
@@ -194,10 +191,11 @@ async def upload_excel(
 
         players_dict = {}
         resumen_stats = {} 
-
         dorsales = df['DEV'].unique()
 
         for dev in dorsales:
+            dev_str = str(dev) # 💡 RESTAURADO: Usamos el DEV original como clave para no romper el simulador
+
             df_jugador = df[df['DEV'] == dev].drop_duplicates(subset=['timestamp']).set_index('timestamp')
             df_sincronizado = df_jugador.reindex(rango_global)
             
@@ -205,19 +203,32 @@ async def upload_excel(
             df_sincronizado['acc'] = df_sincronizado['vel_suavizada'].diff(periods=5) / 0.5
             df_sincronizado['acc'] = df_sincronizado['acc'].rolling(window=5, min_periods=1).mean()
             
+            df_sincronizado['jerk_abs'] = df_sincronizado['acc'].diff().abs()
+            df_sincronizado['pl_frame'] = df_sincronizado['jerk_abs'] * 0.02 
+            
             def get_period_stats(pdf):
                 if pdf.empty or pdf['vel'].isna().all():
-                    return {"dist": 0, "max_v": 0, "sprints": 0, "acels": 0}
+                    return {"dist": 0, "max_v": 0, "sprints": 0, "acels": 0, "decels": 0, "hsr": 0, "pl": 0}
+                
                 distancia = (pdf['vel'].fillna(0) * 0.1).sum()
+                hsr_dist = (pdf.loc[pdf['vel'] > ms_hsr, 'vel'].fillna(0) * 0.1).sum()
                 v_max = pdf['vel'].max()
+                
                 sprints = ((pdf['vel'] > ms_sprint) & (pdf['vel'].shift(1) <= ms_sprint)).sum()
                 acels = ((pdf['acc'] > u_acel) & (pdf['acc'].shift(1) <= u_acel)).sum()
-                return {"dist": int(distancia), "max_v": round(float(v_max), 2), "sprints": int(sprints), "acels": int(acels)}
+                decels = ((pdf['acc'] < -u_acel) & (pdf['acc'].shift(1) >= -u_acel)).sum()
+                player_load = pdf['pl_frame'].sum()
+
+                return {
+                    "dist": int(distancia), "max_v": round(float(v_max), 2), 
+                    "sprints": int(sprints), "acels": int(acels), "decels": int(decels), 
+                    "hsr": int(hsr_dist), "pl": int(player_load)
+                }
 
             h1_data = df_sincronizado.loc[df_sincronizado.index.isin(rango_h1)]
             h2_data = df_sincronizado.loc[df_sincronizado.index.isin(rango_h2)]
 
-            resumen_stats[str(dev)] = {
+            resumen_stats[dev_str] = {
                 "h1": get_period_stats(h1_data),
                 "h2": get_period_stats(h2_data),
                 "total": get_period_stats(df_sincronizado) 
@@ -228,7 +239,7 @@ async def upload_excel(
                 if pd.isna(row['lat']):
                     lista_jugador.append(None)
                 else:
-                    v, a = row['vel'], row['acc'] if not pd.isna(row['acc']) else 0
+                    v, a, pl = row['vel'], row['acc'] if not pd.isna(row['acc']) else 0, row['pl_frame'] if not pd.isna(row['pl_frame']) else 0
                     zona = "Trote"
                     if v > ms_sprint: zona = "Sprint"
                     elif v > ms_hsr: zona = "HSR"
@@ -239,22 +250,34 @@ async def upload_excel(
 
                     lista_jugador.append({
                         "lat": row['lat'], "lon": row['lon'], "vel": v, "acc": a,
-                        "zona": zona, "fuerza": fuerza
+                        "zona": zona, "fuerza": fuerza, "pl": pl
                     })
-            players_dict[str(dev)] = lista_jugador
+            
+            players_dict[dev_str] = lista_jugador
 
         match_id = str(uuid.uuid4())
+        campo_nombre = campo_select["nombre"] if campo_select else "Campo"
+        
+        nuevo_partido_db = models.Match(
+            id=match_id,
+            name=match_name,
+            date=fecha_str,
+            field=campo_nombre,
+            filename=file.filename,
+            resumen=resumen_stats,
+            club_id=club_id
+        )
+        db.add(nuevo_partido_db)
+        db.commit()
+
         datos_partido = {
-            "metadata": {"id": match_id, "name": match_name, "filename": file.filename, "date": fecha_str, "field": campo_select["nombre"] if campo_select else "Campo"},
+            "metadata": {"id": match_id, "name": match_name, "filename": file.filename, "date": fecha_str, "field": campo_nombre},
             "players": players_dict,
             "resumen": resumen_stats, 
             "field_limits": field_limits,
             "config": {
-                "u_sprint": ms_sprint, 
-                "u_hsr": ms_hsr, 
-                "u_acel": u_acel, 
-                "h1_frames": len(rango_h1), 
-                "h2_frames": len(rango_h2)
+                "u_sprint": ms_sprint, "u_hsr": ms_hsr, "u_acel": u_acel, 
+                "h1_frames": len(rango_h1), "h2_frames": len(rango_h2)
             }
         }
         
@@ -264,6 +287,97 @@ async def upload_excel(
         return {"status": "success", "match_id": match_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/jugador/{player_id}/stats")
+def get_player_stats(player_id: int, db: Session = Depends(get_db)):
+    player = db.query(models.Player).filter(models.Player.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Jugador no encontrado")
+    
+    matches = db.query(models.Match).filter(models.Match.club_id == player.club_id).all()
+    
+    kpis = {
+        "minutos": 0, "distancia": 0, "vmax": 0, "distRelativa": 0, 
+        "playerLoad": 0, "sprints": 0, "hsr": 0, "acels": 0, "decels": 0
+    }
+    
+    partidos_jugados = 0
+    
+    for m in matches:
+        res = m.resumen
+        # 💡 SOLUCIÓN: Buscamos usando el DORSAL del jugador, no su ID interno
+        if res and str(player.dorsal) in res:
+            partidos_jugados += 1
+            p_stats = res[str(player.dorsal)]["total"]
+            
+            kpis["distancia"] += p_stats.get("dist", 0)
+            kpis["sprints"] += p_stats.get("sprints", 0)
+            kpis["acels"] += p_stats.get("acels", 0)
+            kpis["decels"] += p_stats.get("decels", 0)
+            kpis["hsr"] += p_stats.get("hsr", 0)
+            kpis["playerLoad"] += p_stats.get("pl", 0)
+            kpis["minutos"] += 90 
+            
+            if p_stats.get("max_v", 0) > kpis["vmax"]:
+                kpis["vmax"] = p_stats.get("max_v", 0)
+
+    if kpis["minutos"] > 0:
+        kpis["distRelativa"] = round(kpis["distancia"] / kpis["minutos"], 1)
+
+    player_load_acumulado = []
+    if kpis["playerLoad"] > 0:
+        media_load_por_partido = kpis["playerLoad"] / partidos_jugados
+        for i in range(19): 
+            minuto = i * 5
+            load_en_minuto = int((media_load_por_partido / 90) * minuto)
+            player_load_acumulado.append({"minuto": minuto, "load": load_en_minuto})
+    else:
+        player_load_acumulado = [{"minuto": 0, "load": 0}, {"minuto": 90, "load": 0}]
+
+    dist_trote = kpis["distancia"] - kpis["hsr"] - kpis["sprints"]*10 
+    zonas_velocidad = [
+        {"name": 'Trote', "value": round((dist_trote / (kpis["distancia"]+1)) * 100, 1), "color": '#f1c40f'},
+        {"name": 'HSR', "value": round((kpis["hsr"] / (kpis["distancia"]+1)) * 100, 1), "color": '#e67e22'}
+    ]
+
+    return {
+        "player": {
+            "id": player.id, "name": player.name, "dorsal": player.dorsal,
+            "position": player.position, "photo_url": player.photo_url
+        },
+        "kpis": kpis,
+        "playerLoadAcumulado": player_load_acumulado,
+        "zonasVelocidad": zonas_velocidad
+    }
+# ==========================================
+#        NUEVOS ENDPOINTS (PLANTILLA)
+# ==========================================
+
+@app.get("/club/{club_id}/players")
+def get_players(club_id: int, db: Session = Depends(get_db)):
+    players = db.query(models.Player).filter(models.Player.club_id == club_id).order_by(models.Player.dorsal).all()
+    return players
+
+@app.post("/club/{club_id}/players")
+def add_player(
+    club_id: int, 
+    dorsal: str = Form(...),
+    name: str = Form(...),
+    position: str = Form("Desconocida"),
+    photo_url: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    new_player = models.Player(
+        dorsal=dorsal, 
+        name=name, 
+        position=position, 
+        photo_url=photo_url, 
+        club_id=club_id
+    )
+    db.add(new_player)
+    db.commit()
+    db.refresh(new_player)
+    return {"status": "success", "player_id": new_player.id}
 
 @app.get("/frames")
 def get_frames():

@@ -12,10 +12,14 @@ export async function getFrames() {
 
 // Subir y procesar un nuevo Excel
 export async function uploadExcel(file, matchName, times, fieldId, thresholds) {
+    const clubId = localStorage.getItem("activeClubId");
+    if (!clubId) throw new Error("No has seleccionado un club activo");
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("match_name", matchName || "Partido sin nombre");
     formData.append("field_id", fieldId || "");
+    formData.append("club_id", clubId); // NUEVO
 
     formData.append("start_h1", times.start_h1 || "");
     formData.append("end_h1", times.end_h1 || "");
@@ -42,7 +46,11 @@ export async function uploadExcel(file, matchName, times, fieldId, thresholds) {
 
 // --- NUEVO: OBTENER LISTA DE PARTIDOS GUARDADOS ---
 export async function getSavedMatches() {
-    const response = await fetch(`${API_URL}/matches`);
+    const clubId = localStorage.getItem("activeClubId");
+    if (!clubId) throw new Error("No has seleccionado un club");
+
+    // Ahora pedimos los partidos filtrados por club
+    const response = await fetch(`${API_URL}/matches/club/${clubId}`);
     if (!response.ok) throw new Error("Error al obtener la lista de partidos");
     return await response.json();
 }
@@ -63,6 +71,16 @@ export async function deleteSavedMatch(matchId) {
     return await response.json();
 }
 
+// --- NUEVO: PLANTILLA ---
+export async function getClubPlayers() {
+    const clubId = localStorage.getItem("activeClubId");
+    if (!clubId) throw new Error("No has seleccionado un club activo");
+
+    const response = await fetch(`${API_URL}/club/${clubId}/players`);
+    if (!response.ok) throw new Error("Error al obtener la plantilla");
+    return await response.json();
+}
+
 // --- NUEVO: AUTENTICACIÓN ---
 export async function loginUser(email, password) {
     const formData = new FormData();
@@ -77,6 +95,39 @@ export async function loginUser(email, password) {
     if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Error al iniciar sesión");
+    }
+    return await response.json();
+}
+
+// --- NUEVO: AÑADIR JUGADOR ---
+export async function addPlayer(playerData) {
+    const clubId = localStorage.getItem("activeClubId");
+    if (!clubId) throw new Error("No has seleccionado un club activo");
+
+    // El backend espera recibir los datos como Form (FormData)
+    const formData = new FormData();
+    formData.append("name", playerData.name);
+    formData.append("dorsal", playerData.dorsal);
+    formData.append("position", playerData.position);
+    if (playerData.photo_url) formData.append("photo_url", playerData.photo_url);
+
+    const response = await fetch(`${API_URL}/club/${clubId}/players`, {
+        method: "POST",
+        body: formData
+    });
+
+    if (!response.ok) throw new Error("Error al guardar el jugador");
+    return await response.json();
+}
+
+export async function getPlayerStats(playerId) {
+    // Asegúrate de usar la URL base correcta si la tienes definida en una constante, 
+    // o pon directamente el string si no:
+    const baseUrl = "http://127.0.0.1:8000"; 
+    
+    const response = await fetch(`${baseUrl}/jugador/${playerId}/stats`);
+    if (!response.ok) {
+        throw new Error("Error al obtener las estadísticas del jugador");
     }
     return await response.json();
 }

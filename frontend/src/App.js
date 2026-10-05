@@ -5,6 +5,8 @@ import Pitch from "./Pitch";
 import Login from "./Login";
 import Layout from "./Layout";
 import SeleccionClub from "./SeleccionClub";
+import Plantilla from "./Plantilla";
+import PlayerDashboard from "./PlayerDashboard";
 
 const DEFAULT_ROLES = [
   { id: "Banquillo", name: "Banquillo ⚫", color: "#000000", isDefault: true },
@@ -14,11 +16,16 @@ const DEFAULT_ROLES = [
 ];
 
 function App() {
-  // --- ESTADOS DE AUTENTICACIÓN ---
+  // --- ESTADOS DE AUTENTICACIÓN Y MULTITENANCY ---
   const [user, setUser] = useState(null);
   const navigate = useNavigate();
 
-  // Comprobar si hay sesión iniciada
+  const [activeClub, setActiveClub] = useState(() => {
+    const saved = localStorage.getItem("activeClub");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Comprobar si hay sesión iniciada al cargar
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
     if (savedUser) {
@@ -29,11 +36,14 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("activeClub");
+    localStorage.removeItem("activeClubId");
     setUser(null);
+    setActiveClub(null);
     navigate("/login");
   };
 
-  // --- ESTADOS ORIGINALES ---
+  // --- ESTADOS ORIGINALES DEL SIMULADOR ---
   const [appMode, setAppMode] = useState("menu");
 
   const [players, setPlayers] = useState({});
@@ -348,7 +358,7 @@ function App() {
       return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    let stats = { currentVel: 0, maxVel: 0, distance: 0, sprints: 0, hsrDist: 0, hmldDist: 0, acels: 0, decels: 0 };
+    let stats = { currentVel: 0, maxVel: 0, distance: 0, sprints: 0, hsrDist: 0, hmldDist: 0, acels: 0, decels: 0, playerLoad: 0 };
 
     if (selectedPlayer && players[selectedPlayer]) {
       const historyToCurrentFrame = players[selectedPlayer].slice(startFrame, frame + 1);
@@ -363,8 +373,13 @@ function App() {
           if (frameData) {
             const v = frameData.vel || 0;
             const distFrame = v * 0.1;
+            
             if (v > stats.maxVel) stats.maxVel = v;
             stats.distance += distFrame;
+            
+            // Sumamos el Player Load real del fotograma generado por el backend
+            stats.playerLoad += (frameData.pl || 0);
+
             if (frameData.zona === "Sprint" || frameData.zona === "HSR") stats.hsrDist += distFrame;
             if (frameData.zona === "Sprint" || frameData.zona === "HSR" || frameData.zona === "HMLD") stats.hmldDist += distFrame;
             if (frameData.zona === "Sprint" && !isSprint) { stats.sprints++; isSprint = true; } else if (frameData.zona !== "Sprint") { isSprint = false; }
@@ -502,6 +517,7 @@ function App() {
                   <h4 style={{ margin: "0 0 10px 0", color: "#b87d21" }}>RESISTENCIA</h4>
                   <div style={{ display: "flex", justifyContent: "space-around" }}>
                     <div><div style={{ fontSize: "12px", color: "#666" }}>Dist. ({selectedPeriod.toUpperCase()})</div><div style={{ fontSize: "18px", fontWeight: "bold", color: "#b87d21" }}>{stats.distance.toFixed(0)}m</div></div>
+                    <div><div style={{ fontSize: "12px", color: "#666" }}>PL</div><div style={{ fontSize: "18px", fontWeight: "bold", color: "#b87d21" }}>{stats.playerLoad.toFixed(0)}</div></div>
                     <div><div style={{ fontSize: "12px", color: "#666" }}>HSR (&gt;{activeConfig ? (activeConfig.u_hsr * 3.6).toFixed(1) : 21}km/h)</div><div style={{ fontSize: "18px", fontWeight: "bold", color: "#b87d21" }}>{stats.hsrDist.toFixed(0)}m</div></div>
                     <div><div style={{ fontSize: "12px", color: "#666" }}>HMLD (&gt;3m/s)</div><div style={{ fontSize: "18px", fontWeight: "bold", color: "#b87d21" }}>{stats.hmldDist.toFixed(0)}m</div></div>
                   </div>
@@ -587,20 +603,64 @@ function App() {
     );
   };
 
-  // --- ESTRUCTURA DEL ROUTER PRINCIPAL ---
+  // --- ESTRUCTURA DEL ROUTER PRINCIPAL PROTEGIDO ---
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/inicio" /> : <Login onLogin={setUser} />} />
       
-      {/* Rutas Protegidas envueltas en el Layout */}
+      {/* Redirección raíz */}
       {user && (
-        <Route path="/" element={<Layout user={user} onLogout={handleLogout}><Navigate to="/inicio" /></Layout>} />
+        <Route path="/" element={<Navigate to="/inicio" />} />
       )}
+      
+      {/* PANTALLA DE SELECCIÓN DE EQUIPO */}
       {user && (
-        <Route path="/inicio" element={<Layout user={user} onLogout={handleLogout}><SeleccionClub /></Layout>} />
+        <Route path="/inicio" element={
+          <Layout user={user} activeClub={activeClub} onLogout={handleLogout}>
+            <SeleccionClub onSelectClub={(club) => {
+              // 1. Guardamos el nuevo club
+              setActiveClub(club);
+              localStorage.setItem("activeClub", JSON.stringify(club));
+              localStorage.setItem("activeClubId", club.id);
+              
+              // 2. 💡 LIMPIAMOS LA MEMORIA DEL PARTIDO ANTERIOR
+              setAppMode("menu");
+              setPlayers({});
+              setResumen(null);
+              setFrame(0);
+              
+              // 3. Vamos a la pantalla principal
+              navigate("/app");
+            }} />
+          </Layout>
+        } />
       )}
+
+      {/* RUTA PROTEGIDA (PLANTILLA) */}
       {user && (
-        <Route path="/app" element={<Layout user={user} onLogout={handleLogout}>{renderAppContent()}</Layout>} />
+        <Route path="/plantilla" element={
+          activeClub 
+            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><Plantilla /></Layout>
+            : <Navigate to="/inicio" />
+        } />
+      )}
+
+      {/* RUTA PROTEGIDA (SIMULADOR) */}
+      {user && (
+        <Route path="/app" element={
+          activeClub 
+            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}>{renderAppContent()}</Layout>
+            : <Navigate to="/inicio" />
+        } />
+      )}
+
+      {/* RUTA PROTEGIDA (DASHBOARD INDIVIDUAL) */}
+      {user && (
+        <Route path="/jugador/:id" element={
+          activeClub 
+            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><PlayerDashboard /></Layout>
+            : <Navigate to="/inicio" />
+        } />
       )}
 
       {/* Redirección por defecto si no está logueado o la ruta no existe */}
