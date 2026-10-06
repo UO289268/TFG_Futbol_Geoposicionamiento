@@ -131,3 +131,12 @@ export async function getPlayerStats(playerId) {
     }
     return await response.json();
 }
+
+export async function getMatchSummary(matchId) {
+    const baseUrl = "http://127.0.0.1:8000"; 
+    const response = await fetch(`${baseUrl}/matches/${matchId}/resumen`);
+    if (!response.ok) {
+        throw new Error("Error al obtener el resumen del partido");
+    }
+    return await response.json();
+}

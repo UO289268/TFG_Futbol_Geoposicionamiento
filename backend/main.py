@@ -135,6 +135,23 @@ def delete_match(match_id: str, db: Session = Depends(get_db)):
         
     return {"status": "success", "message": "Partido eliminado"}
 
+@app.get("/matches/{match_id}/resumen")
+def get_match_summary(match_id: str, db: Session = Depends(get_db)):
+    # Buscamos el resumen directamente en la base de datos, sin abrir el JSON gigante
+    db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
+    if not db_match:
+        raise HTTPException(status_code=404, detail="Partido no encontrado")
+    return {
+        "metadata": {
+            "id": db_match.id,
+            "name": db_match.name,
+            "date": db_match.date,
+            "field": db_match.field,
+            "filename": db_match.filename
+        },
+        "resumen": db_match.resumen
+    }
+
 @app.post("/upload")
 async def upload_excel(
     file: UploadFile = File(...),
@@ -194,7 +211,7 @@ async def upload_excel(
         dorsales = df['DEV'].unique()
 
         for dev in dorsales:
-            dev_str = str(dev) # 💡 RESTAURADO: Usamos el DEV original como clave para no romper el simulador
+            dev_str = str(dev) 
 
             df_jugador = df[df['DEV'] == dev].drop_duplicates(subset=['timestamp']).set_index('timestamp')
             df_sincronizado = df_jugador.reindex(rango_global)
@@ -208,7 +225,10 @@ async def upload_excel(
             
             def get_period_stats(pdf):
                 if pdf.empty or pdf['vel'].isna().all():
-                    return {"dist": 0, "max_v": 0, "sprints": 0, "acels": 0, "decels": 0, "hsr": 0, "pl": 0}
+                    return {"dist": 0, "max_v": 0, "sprints": 0, "acels": 0, "decels": 0, "hsr": 0, "pl": 0, "mins": 0}
+                
+                # 💡 CALCULAMOS LOS MINUTOS REALES CONTANDO LOS FOTOGRAMAS ACTIVOS
+                minutos = int((pdf['vel'].notna().sum() * 0.1) / 60)
                 
                 distancia = (pdf['vel'].fillna(0) * 0.1).sum()
                 hsr_dist = (pdf.loc[pdf['vel'] > ms_hsr, 'vel'].fillna(0) * 0.1).sum()
@@ -222,7 +242,7 @@ async def upload_excel(
                 return {
                     "dist": int(distancia), "max_v": round(float(v_max), 2), 
                     "sprints": int(sprints), "acels": int(acels), "decels": int(decels), 
-                    "hsr": int(hsr_dist), "pl": int(player_load)
+                    "hsr": int(hsr_dist), "pl": int(player_load), "mins": minutos
                 }
 
             h1_data = df_sincronizado.loc[df_sincronizado.index.isin(rango_h1)]
@@ -288,6 +308,7 @@ async def upload_excel(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.get("/jugador/{player_id}/stats")
 def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     player = db.query(models.Player).filter(models.Player.id == player_id).first()
@@ -305,7 +326,6 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     
     for m in matches:
         res = m.resumen
-        # 💡 SOLUCIÓN: Buscamos usando el DORSAL del jugador, no su ID interno
         if res and str(player.dorsal) in res:
             partidos_jugados += 1
             p_stats = res[str(player.dorsal)]["total"]
@@ -316,7 +336,8 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
             kpis["decels"] += p_stats.get("decels", 0)
             kpis["hsr"] += p_stats.get("hsr", 0)
             kpis["playerLoad"] += p_stats.get("pl", 0)
-            kpis["minutos"] += 90 
+            # 💡 AQUÍ LEEMOS LOS MINUTOS REALES EN LUGAR DE ASUMIR 90
+            kpis["minutos"] += p_stats.get("mins", 0) 
             
             if p_stats.get("max_v", 0) > kpis["vmax"]:
                 kpis["vmax"] = p_stats.get("max_v", 0)
@@ -325,11 +346,15 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
         kpis["distRelativa"] = round(kpis["distancia"] / kpis["minutos"], 1)
 
     player_load_acumulado = []
-    if kpis["playerLoad"] > 0:
+    if kpis["playerLoad"] > 0 and kpis["minutos"] > 0:
         media_load_por_partido = kpis["playerLoad"] / partidos_jugados
-        for i in range(19): 
-            minuto = i * 5
-            load_en_minuto = int((media_load_por_partido / 90) * minuto)
+        media_minutos = int(kpis["minutos"] / partidos_jugados)
+        if media_minutos == 0: media_minutos = 1
+        
+        # 💡 Adaptamos la curva gráfica al tiempo real jugado
+        for i in range(20): 
+            minuto = int((media_minutos / 19) * i)
+            load_en_minuto = int((media_load_por_partido / media_minutos) * minuto)
             player_load_acumulado.append({"minuto": minuto, "load": load_en_minuto})
     else:
         player_load_acumulado = [{"minuto": 0, "load": 0}, {"minuto": 90, "load": 0}]

@@ -7,6 +7,8 @@ import Layout from "./Layout";
 import SeleccionClub from "./SeleccionClub";
 import Plantilla from "./Plantilla";
 import PlayerDashboard from "./PlayerDashboard";
+import TeamComparison from "./TeamComparison";
+import Sesiones from "./Sesiones";
 
 const DEFAULT_ROLES = [
   { id: "Banquillo", name: "Banquillo ⚫", color: "#000000", isDefault: true },
@@ -408,49 +410,19 @@ function App() {
 
         {showResumen && resumen && (
           <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.85)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ backgroundColor: "white", padding: "30px", borderRadius: "12px", width: "90%", maxHeight: "85%", overflowY: "auto", position: "relative" }}>
-              <button onClick={() => setShowResumen(false)} style={{ position: "absolute", top: "20px", right: "20px", cursor: "pointer", fontSize: "20px", border: "none", background: "none" }}>✖</button>
-              <h2 style={{ color: "#2c3e50", marginBottom: "20px", textAlign: "center" }}>Estadísticas Finales del Partido</h2>
-              <table style={{ width: "100%", borderCollapse: "collapse", color: "#333" }}>
-                <thead>
-                  <tr style={{ backgroundColor: "#34495e", color: "white" }}>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Jugador</th>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Período</th>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Distancia (m)</th>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Vel. Máx (m/s)</th>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Sprints</th>
-                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Aceleraciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(resumen).map(([dev, playerStats]) => (
-                    <React.Fragment key={dev}>
-                      <tr style={{ backgroundColor: "#fdfdfd" }}>
-                        <td rowSpan="3" style={{ textAlign: "center", fontWeight: "bold", border: "1px solid #ddd" }}>Dorsal {dev}</td>
-                        <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>1ª Parte</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.dist}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.max_v}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.sprints}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.acels}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>2ª Parte</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.dist}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.max_v}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.sprints}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.acels}</td>
-                      </tr>
-                      <tr style={{ backgroundColor: "#f1f8ff", fontWeight: "bold" }}>
-                        <td style={{ padding: "8px", border: "1px solid #ddd" }}>TOTAL</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.dist}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.max_v}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.sprints}</td>
-                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.acels}</td>
-                      </tr>
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ backgroundColor: "#f4f6f8", padding: "30px", borderRadius: "12px", width: "90%", maxWidth: "1200px", maxHeight: "90%", overflowY: "auto", position: "relative" }}>
+              
+              <button onClick={() => setShowResumen(false)} style={{ position: "absolute", top: "20px", right: "20px", cursor: "pointer", fontSize: "20px", border: "none", background: "white", width: "40px", height: "40px", borderRadius: "50%", boxShadow: "0 2px 5px rgba(0,0,0,0.1)", zIndex: 10 }}>
+                ✖
+              </button>
+              
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
+                <h2 style={{ color: "#2c3e50", margin: 0 }}>Métricas del Equipo (Partido Completo)</h2>
+              </div>
+
+              {/* El periodo se queda fijo en "total" para mostrar siempre todo el partido */}
+              <TeamComparison resumen={resumen} period="total" />
+              
             </div>
           </div>
         )}
@@ -641,6 +613,15 @@ function App() {
         <Route path="/plantilla" element={
           activeClub 
             ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><Plantilla /></Layout>
+            : <Navigate to="/inicio" />
+        } />
+      )}
+
+      {/* RUTA PROTEGIDA (SESIONES) */}
+      {user && (
+        <Route path="/sesiones" element={
+          activeClub 
+            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><Sesiones /></Layout>
             : <Navigate to="/inicio" />
         } />
       )}
