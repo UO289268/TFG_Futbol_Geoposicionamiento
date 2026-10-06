@@ -1,78 +1,86 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { getClubPlayers } from './api';
+import { getTeamPlayers } from './api';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-function TeamComparison({ resumen, period = "total" }) {
-  const [nombres, setNombres] = useState({});
+function TeamComparison({ resumen, period }) {
+    const [playersDB, setPlayersDB] = useState([]);
 
-  useEffect(() => {
-    async function fetchNombres() {
-      try {
-        const playersDB = await getClubPlayers();
-        const mapaNombres = {};
-        playersDB.forEach(p => {
-          mapaNombres[p.dorsal.toString()] = p.name.split(" ")[0]; // Coge solo el primer nombre o apodo para que quepa bien
+    useEffect(() => {
+        getTeamPlayers().then(setPlayersDB).catch(console.error);
+    }, []);
+
+    if (!resumen) return null;
+
+    // Función para procesar y ordenar los datos de mayor a menor
+    const getData = (metricKey) => {
+        const chartData = [];
+        Object.keys(resumen).forEach(dorsal => {
+            const stats = resumen[dorsal][period];
+            if (stats && stats[metricKey] > 0) {
+                const dbPlayer = playersDB.find(p => String(p.dorsal) === String(dorsal));
+                const name = dbPlayer ? dbPlayer.name : `Dorsal ${dorsal}`;
+                chartData.push({
+                    name: name,
+                    value: stats[metricKey]
+                });
+            }
         });
-        setNombres(mapaNombres);
-      } catch (error) {
-        console.error("Error cargando nombres", error);
-      }
-    }
-    fetchNombres();
-  }, []);
-
-  if (!resumen) return null;
-
-  // 1. Transformar el JSON del backend en un array manejable
-  const data = Object.keys(resumen).map(dorsal => {
-    const stats = resumen[dorsal][period];
-    return {
-      name: nombres[dorsal] || `Dorsal ${dorsal}`,
-      dist: stats.dist || 0,
-      hsr: stats.hsr || 0,
-      pl: stats.pl || 0,
-      vmax: stats.max_v || 0
+        return chartData.sort((a, b) => b.value - a.value); 
     };
-  });
 
-  // 2. Ordenar los datos de menor a mayor para que Recharts dibuje el mayor arriba
-  const byDist = [...data].sort((a, b) => a.dist - b.dist);
-  const byHsr = [...data].sort((a, b) => a.hsr - b.hsr);
-  const byPL = [...data].sort((a, b) => a.pl - b.pl);
-  const byVmax = [...data].sort((a, b) => a.vmax - b.vmax);
+    const distData = getData('dist');
+    const hsrData = getData('hsr');
+    const plData = getData('pl');
+    const vmaxData = getData('max_v');
 
-  const ChartCard = ({ title, dataSorted, dataKey, color, unit }) => (
-    <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "12px", border: "1px solid #e0e0e0", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
-      <h3 style={{ margin: "0 0 15px 0", color: "#2c3e50", fontSize: "16px" }}>{title}</h3>
-      <div style={{ height: "280px" }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart layout="vertical" data={dataSorted} margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
-            <XAxis type="number" hide />
-            <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#7f8c8d", fontWeight: "bold" }} width={80} />
-            <Tooltip 
-              cursor={{fill: 'transparent'}} 
-              contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 10px rgba(0,0,0,0.1)", fontWeight: "bold" }}
-              formatter={(value) => [`${value} ${unit}`, title]}
-            />
-            <Bar dataKey={dataKey} radius={[0, 4, 4, 0]} barSize={12}>
-              {dataSorted.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
+    // Plantilla universal para las 4 gráficas
+    const renderChart = (data, color, title) => {
+        // 💡 Calculamos la altura dinámicamente: 35px por cada jugadora para que nunca se aplasten
+        const chartHeight = Math.max(300, data.length * 35); 
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "10px" }}>
-      <ChartCard title="Distancia" dataSorted={byDist} dataKey="dist" color="#3b82f6" unit="m" />
-      <ChartCard title="HSR" dataSorted={byHsr} dataKey="hsr" color="#f97316" unit="m" />
-      <ChartCard title="Player Load" dataSorted={byPL} dataKey="pl" color="#10b981" unit="u.a." />
-      <ChartCard title="Vel. Máxima" dataSorted={byVmax} dataKey="vmax" color="#ef4444" unit="km/h" />
-    </div>
-  );
+        return (
+            <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "12px", border: "1px solid #e0e0e0" }}>
+                <h4 style={{ margin: "0 0 15px 0", color: "#2c3e50" }}>{title}</h4>
+                <div style={{ height: `${chartHeight}px`, width: "100%" }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart layout="vertical" data={data} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+                            {/* 💡 Activamos las líneas de guía verticales para leer los valores fácilmente */}
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} vertical={true} stroke="#ecf0f1" />
+                            
+                            {/* 💡 Activamos el Eje X numérico en la parte inferior */}
+                            <XAxis type="number" tick={{ fill: '#7f8c8d', fontSize: 13, fontWeight: 'bold' }} stroke="#bdc3c7" />
+                            
+                            {/* 💡 interval={0} obliga a React a pintar TODOS los nombres sin saltarse ninguno */}
+                            <YAxis 
+                                type="category" 
+                                dataKey="name" 
+                                interval={0} 
+                                width={85} 
+                                tick={{ fill: '#34495e', fontSize: 13, fontWeight: 'bold' }} 
+                                axisLine={false} 
+                                tickLine={false} 
+                            />
+                            
+                            <Tooltip 
+                                cursor={{ fill: 'rgba(0,0,0,0.04)' }} 
+                                contentStyle={{ borderRadius: "8px", border: "none", boxShadow: "0 4px 15px rgba(0,0,0,0.1)", fontWeight: 'bold' }} 
+                            />
+                            <Bar dataKey="value" fill={color} radius={[0, 4, 4, 0]} barSize={18} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", paddingBottom: "20px" }}>
+            {renderChart(distData, "#3498db", "Distancia Total (m)")}
+            {renderChart(hsrData, "#e67e22", "Distancia HSR (m)")}
+            {renderChart(plData, "#2ecc71", "Player Load (u.a.)")}
+            {renderChart(vmaxData, "#e74c3c", "Velocidad Máxima (km/h)")}
+        </div>
+    );
 }
 
 export default TeamComparison;

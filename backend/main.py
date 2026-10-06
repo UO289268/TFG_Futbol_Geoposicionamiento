@@ -10,11 +10,9 @@ import bcrypt
 import jwt
 import datetime
 
-# --- IMPORTACIONES DE TUS NUEVOS ARCHIVOS ---
 import models
 from database import engine, get_db
 
-# Crea las tablas en la base de datos local si no existen
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -27,22 +25,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Constantes para la encriptación de Tokens JWT
 SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
 ALGORITHM = "HS256"
 
 datos_partido = None
 
-# --- DIRECTORIOS ---
 CAMPOS_FILE = "data/campos.json"
 MATCHES_DIR = "data/matches"
 os.makedirs(MATCHES_DIR, exist_ok=True)
 
-
 # ==========================================
-#        NUEVOS ENDPOINTS (USUARIOS Y LOGIN)
+#        USUARIOS Y LOGIN
 # ==========================================
-
 @app.post("/register")
 def register_user(
     email: str = Form(...), 
@@ -51,12 +45,10 @@ def register_user(
     role: str = Form("jugador"), 
     db: Session = Depends(get_db)
 ):
-    # Comprobar si el correo ya existe
     db_user = db.query(models.User).filter(models.User.email == email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     
-    # Hashear contraseña y guardar en la Base de Datos
     hashed_pw = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     new_user = models.User(email=email, hashed_password=hashed_pw, name=name, role=role)
     
@@ -70,11 +62,9 @@ def register_user(
 def login(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == email).first()
     
-    # Verificar si el usuario existe y si la contraseña coincide
     if not user or not bcrypt.checkpw(password.encode('utf-8'), user.hashed_password.encode('utf-8')):
         raise HTTPException(status_code=400, detail="Email o contraseña incorrectos")
     
-    # Generar Token JWT válido por 24 horas
     payload = {
         "sub": user.email,
         "id": user.id,
@@ -89,11 +79,103 @@ def login(email: str = Form(...), password: str = Form(...), db: Session = Depen
         "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
     }
 
+# ==========================================
+#        CLUBES
+# ==========================================
+@app.get("/clubs")
+def get_clubs(db: Session = Depends(get_db)):
+    clubs = db.query(models.Club).all()
+    
+    # 💡 Autogenerar los clubes por defecto si la tabla está vacía
+    if not clubs:
+        c1 = models.Club(name="Real Madrid", location="Madrid, España", escudo="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTxZY_OjcRIUSudjl0C7cTUoEFbFGhbYRTnWic4By4Yrg&s=10", color="#00529F")
+        c2 = models.Club(name="Real Sporting de Gijón", location="Gijón, España", escudo="https://assets.footylogos.com/previews/sporting-gijon/sporting-gijon-logo-footylogos-1200.webp", color="#ED1C24")
+        db.add_all([c1, c2])
+        db.commit()
+        clubs = db.query(models.Club).all()
+
+    res = []
+    for c in clubs:
+        equipos_count = db.query(models.Team).filter(models.Team.club_id == c.id).count()
+        res.append({
+            "id": c.id,
+            "nombre": c.name,
+            "ubicacion": c.location,
+            "escudo": c.escudo,
+            "color": c.color,
+            "equipos": equipos_count
+        })
+    return res
+
+@app.post("/clubs")
+def create_club(
+    name: str = Form(...),
+    location: str = Form("Desconocida"),
+    escudo: str = Form(""),
+    color: str = Form("#2c3e50"),
+    db: Session = Depends(get_db)
+):
+    new_club = models.Club(name=name, location=location, escudo=escudo, color=color)
+    db.add(new_club)
+    db.commit()
+    db.refresh(new_club)
+    return {"status": "success", "club_id": new_club.id}
 
 # ==========================================
-#        ENDPOINTS ANTIGUOS (SIMULADOR Y EXCEL)
+#        EQUIPOS
 # ==========================================
+@app.get("/club/{club_id}/teams")
+def get_teams(club_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Team).filter(models.Team.club_id == club_id).all()
 
+@app.post("/club/{club_id}/teams")
+def create_team(club_id: int, name: str = Form(...), category: str = Form(...), db: Session = Depends(get_db)):
+    new_team = models.Team(name=name, category=category, club_id=club_id)
+    db.add(new_team)
+    db.commit()
+    db.refresh(new_team)
+    return {"status": "success", "team_id": new_team.id, "name": new_team.name}
+
+@app.delete("/clubs/{club_id}")
+def delete_club(club_id: int, db: Session = Depends(get_db)):
+    db_club = db.query(models.Club).filter(models.Club.id == club_id).first()
+    if db_club:
+        db.delete(db_club)
+        db.commit()
+    return {"status": "success"}
+
+# ==========================================
+#        PLANTILLA
+# ==========================================
+@app.get("/team/{team_id}/players")
+def get_players(team_id: int, db: Session = Depends(get_db)):
+    players = db.query(models.Player).filter(models.Player.team_id == team_id).order_by(models.Player.dorsal).all()
+    return players
+
+@app.post("/team/{team_id}/players")
+def add_player(
+    team_id: int, 
+    dorsal: str = Form(...),
+    name: str = Form(...),
+    position: str = Form("Desconocida"),
+    photo_url: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    new_player = models.Player(
+        dorsal=dorsal, 
+        name=name, 
+        position=position, 
+        photo_url=photo_url, 
+        team_id=team_id
+    )
+    db.add(new_player)
+    db.commit()
+    db.refresh(new_player)
+    return {"status": "success", "player_id": new_player.id}
+
+# ==========================================
+#        SIMULADOR Y PARTIDOS
+# ==========================================
 def cargar_campos():
     if os.path.exists(CAMPOS_FILE):
         with open(CAMPOS_FILE, "r", encoding="utf-8") as f:
@@ -104,10 +186,9 @@ def cargar_campos():
 def get_fields():
     return cargar_campos()
 
-@app.get("/matches/club/{club_id}")
-def get_saved_matches(club_id: int, db: Session = Depends(get_db)):
-    matches = db.query(models.Match).filter(models.Match.club_id == club_id).order_by(models.Match.date.desc()).all()
-    # Devolvemos el mismo formato que esperaba tu React
+@app.get("/matches/team/{team_id}")
+def get_saved_matches(team_id: int, db: Session = Depends(get_db)):
+    matches = db.query(models.Match).filter(models.Match.team_id == team_id).order_by(models.Match.date.desc()).all()
     return [{"id": m.id, "name": m.name, "date": m.date, "field": m.field, "filename": m.filename} for m in matches]
 
 @app.get("/matches/{match_id}")
@@ -120,24 +201,8 @@ def load_match(match_id: str):
         datos_partido = json.load(f)
     return datos_partido
 
-@app.delete("/matches/{match_id}")
-def delete_match(match_id: str, db: Session = Depends(get_db)):
-    # 1. Borrar de la base de datos
-    db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
-    if db_match:
-        db.delete(db_match)
-        db.commit()
-    
-    # 2. Borrar archivo físico
-    path = os.path.join(MATCHES_DIR, f"{match_id}.json")
-    if os.path.exists(path):
-        os.remove(path)
-        
-    return {"status": "success", "message": "Partido eliminado"}
-
 @app.get("/matches/{match_id}/resumen")
 def get_match_summary(match_id: str, db: Session = Depends(get_db)):
-    # Buscamos el resumen directamente en la base de datos, sin abrir el JSON gigante
     db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
     if not db_match:
         raise HTTPException(status_code=404, detail="Partido no encontrado")
@@ -152,6 +217,19 @@ def get_match_summary(match_id: str, db: Session = Depends(get_db)):
         "resumen": db_match.resumen
     }
 
+@app.delete("/matches/{match_id}")
+def delete_match(match_id: str, db: Session = Depends(get_db)):
+    db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
+    if db_match:
+        db.delete(db_match)
+        db.commit()
+    
+    path = os.path.join(MATCHES_DIR, f"{match_id}.json")
+    if os.path.exists(path):
+        os.remove(path)
+        
+    return {"status": "success", "message": "Partido eliminado"}
+
 @app.post("/upload")
 async def upload_excel(
     file: UploadFile = File(...),
@@ -164,11 +242,13 @@ async def upload_excel(
     u_sprint: float = Form(24.0),
     u_hsr: float = Form(21.0),
     u_acel: float = Form(3.0),
-    club_id: int = Form(...),
+    team_id: int = Form(...),
+    alineacion: str = Form("{}"), 
     db: Session = Depends(get_db)
 ):
     global datos_partido
     try:
+        alineacion_dict = json.loads(alineacion)
         ms_sprint = u_sprint / 3.6
         ms_hsr = u_hsr / 3.6
         campos = cargar_campos()
@@ -227,8 +307,10 @@ async def upload_excel(
                 if pdf.empty or pdf['vel'].isna().all():
                     return {"dist": 0, "max_v": 0, "sprints": 0, "acels": 0, "decels": 0, "hsr": 0, "pl": 0, "mins": 0}
                 
-                # 💡 CALCULAMOS LOS MINUTOS REALES CONTANDO LOS FOTOGRAMAS ACTIVOS
-                minutos = int((pdf['vel'].notna().sum() * 0.1) / 60)
+                segundos_activos = len(pdf['vel'].dropna().index.floor('s').unique())
+                minutos = int(segundos_activos / 60)
+                if minutos == 0 and segundos_activos > 0:
+                    minutos = 1
                 
                 distancia = (pdf['vel'].fillna(0) * 0.1).sum()
                 hsr_dist = (pdf.loc[pdf['vel'] > ms_hsr, 'vel'].fillna(0) * 0.1).sum()
@@ -285,7 +367,7 @@ async def upload_excel(
             field=campo_nombre,
             filename=file.filename,
             resumen=resumen_stats,
-            club_id=club_id
+            team_id=team_id
         )
         db.add(nuevo_partido_db)
         db.commit()
@@ -298,7 +380,8 @@ async def upload_excel(
             "config": {
                 "u_sprint": ms_sprint, "u_hsr": ms_hsr, "u_acel": u_acel, 
                 "h1_frames": len(rango_h1), "h2_frames": len(rango_h2)
-            }
+            },
+            "alineacion": alineacion_dict 
         }
         
         with open(os.path.join(MATCHES_DIR, f"{match_id}.json"), "w", encoding="utf-8") as f:
@@ -308,21 +391,21 @@ async def upload_excel(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @app.get("/jugador/{player_id}/stats")
 def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     player = db.query(models.Player).filter(models.Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Jugador no encontrado")
     
-    matches = db.query(models.Match).filter(models.Match.club_id == player.club_id).all()
+    matches = db.query(models.Match).filter(models.Match.team_id == player.team_id).order_by(models.Match.date.desc()).all()
     
-    kpis = {
+    kpis_totales = {
         "minutos": 0, "distancia": 0, "vmax": 0, "distRelativa": 0, 
         "playerLoad": 0, "sprints": 0, "hsr": 0, "acels": 0, "decels": 0
     }
     
     partidos_jugados = 0
+    historial_partidos = [] # 💡 NUEVO: Guardaremos el desglose por partido
     
     for m in matches:
         res = m.resumen
@@ -330,28 +413,47 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
             partidos_jugados += 1
             p_stats = res[str(player.dorsal)]["total"]
             
-            kpis["distancia"] += p_stats.get("dist", 0)
-            kpis["sprints"] += p_stats.get("sprints", 0)
-            kpis["acels"] += p_stats.get("acels", 0)
-            kpis["decels"] += p_stats.get("decels", 0)
-            kpis["hsr"] += p_stats.get("hsr", 0)
-            kpis["playerLoad"] += p_stats.get("pl", 0)
-            # 💡 AQUÍ LEEMOS LOS MINUTOS REALES EN LUGAR DE ASUMIR 90
-            kpis["minutos"] += p_stats.get("mins", 0) 
+            mins = p_stats.get("mins", 0)
+            dist = p_stats.get("dist", 0)
             
-            if p_stats.get("max_v", 0) > kpis["vmax"]:
-                kpis["vmax"] = p_stats.get("max_v", 0)
+            # 💡 Guardamos los datos de este partido concreto
+            historial_partidos.append({
+                "id": m.id,
+                "name": m.name,
+                "date": m.date,
+                "minutos": mins,
+                "distancia": dist,
+                "vmax": p_stats.get("max_v", 0),
+                "distRelativa": round(dist / mins, 1) if mins > 0 else 0,
+                "playerLoad": p_stats.get("pl", 0),
+                "sprints": p_stats.get("sprints", 0),
+                "hsr": p_stats.get("hsr", 0),
+                "acels": p_stats.get("acels", 0),
+                "decels": p_stats.get("decels", 0)
+            })
+            
+            # Sumamos al total general
+            kpis_totales["distancia"] += dist
+            kpis_totales["sprints"] += p_stats.get("sprints", 0)
+            kpis_totales["acels"] += p_stats.get("acels", 0)
+            kpis_totales["decels"] += p_stats.get("decels", 0)
+            kpis_totales["hsr"] += p_stats.get("hsr", 0)
+            kpis_totales["playerLoad"] += p_stats.get("pl", 0)
+            kpis_totales["minutos"] += mins 
+            
+            if p_stats.get("max_v", 0) > kpis_totales["vmax"]:
+                kpis_totales["vmax"] = p_stats.get("max_v", 0)
 
-    if kpis["minutos"] > 0:
-        kpis["distRelativa"] = round(kpis["distancia"] / kpis["minutos"], 1)
+    if kpis_totales["minutos"] > 0:
+        kpis_totales["distRelativa"] = round(kpis_totales["distancia"] / kpis_totales["minutos"], 1)
 
+    # Gráfica de Player Load promedio
     player_load_acumulado = []
-    if kpis["playerLoad"] > 0 and kpis["minutos"] > 0:
-        media_load_por_partido = kpis["playerLoad"] / partidos_jugados
-        media_minutos = int(kpis["minutos"] / partidos_jugados)
+    if kpis_totales["playerLoad"] > 0 and kpis_totales["minutos"] > 0:
+        media_load_por_partido = kpis_totales["playerLoad"] / partidos_jugados
+        media_minutos = int(kpis_totales["minutos"] / partidos_jugados)
         if media_minutos == 0: media_minutos = 1
         
-        # 💡 Adaptamos la curva gráfica al tiempo real jugado
         for i in range(20): 
             minuto = int((media_minutos / 19) * i)
             load_en_minuto = int((media_load_por_partido / media_minutos) * minuto)
@@ -359,10 +461,10 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     else:
         player_load_acumulado = [{"minuto": 0, "load": 0}, {"minuto": 90, "load": 0}]
 
-    dist_trote = kpis["distancia"] - kpis["hsr"] - kpis["sprints"]*10 
+    dist_trote = kpis_totales["distancia"] - kpis_totales["hsr"] - kpis_totales["sprints"]*10 
     zonas_velocidad = [
-        {"name": 'Trote', "value": round((dist_trote / (kpis["distancia"]+1)) * 100, 1), "color": '#f1c40f'},
-        {"name": 'HSR', "value": round((kpis["hsr"] / (kpis["distancia"]+1)) * 100, 1), "color": '#e67e22'}
+        {"name": 'Trote', "value": round((dist_trote / (kpis_totales["distancia"]+1)) * 100, 1), "color": '#f1c40f'},
+        {"name": 'HSR', "value": round((kpis_totales["hsr"] / (kpis_totales["distancia"]+1)) * 100, 1), "color": '#e67e22'}
     ]
 
     return {
@@ -370,42 +472,14 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
             "id": player.id, "name": player.name, "dorsal": player.dorsal,
             "position": player.position, "photo_url": player.photo_url
         },
-        "kpis": kpis,
+        "kpis": kpis_totales,
+        "historial_partidos": historial_partidos, # 💡 Lo enviamos al frontend
         "playerLoadAcumulado": player_load_acumulado,
         "zonasVelocidad": zonas_velocidad
     }
-# ==========================================
-#        NUEVOS ENDPOINTS (PLANTILLA)
-# ==========================================
-
-@app.get("/club/{club_id}/players")
-def get_players(club_id: int, db: Session = Depends(get_db)):
-    players = db.query(models.Player).filter(models.Player.club_id == club_id).order_by(models.Player.dorsal).all()
-    return players
-
-@app.post("/club/{club_id}/players")
-def add_player(
-    club_id: int, 
-    dorsal: str = Form(...),
-    name: str = Form(...),
-    position: str = Form("Desconocida"),
-    photo_url: str = Form(None),
-    db: Session = Depends(get_db)
-):
-    new_player = models.Player(
-        dorsal=dorsal, 
-        name=name, 
-        position=position, 
-        photo_url=photo_url, 
-        club_id=club_id
-    )
-    db.add(new_player)
-    db.commit()
-    db.refresh(new_player)
-    return {"status": "success", "player_id": new_player.id}
 
 @app.get("/frames")
 def get_frames():
     if datos_partido is None:
         raise HTTPException(status_code=404, detail="No hay archivo en memoria")
-    return datos_partido
+    return datos_partidoh
