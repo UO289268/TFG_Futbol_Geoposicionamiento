@@ -1,11 +1,16 @@
-import React, { useState, useEffect } from "react";
-import { getSavedMatches, getMatchSummary } from "./api"; // 💡 Cambio aquí
+import React, { useState, useEffect, useRef } from "react";
+import { getSavedMatches, getMatchSummary } from "./api"; 
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 
 function Sesiones() {
   const [matches, setMatches] = useState([]);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [resumen, setResumen] = useState(null);
   const [cargando, setCargando] = useState(true);
+  
+  // 💡 Referencia para capturar la tabla de estadísticas
+  const printRef = useRef();
 
   useEffect(() => {
     async function fetchMatches() {
@@ -23,11 +28,34 @@ function Sesiones() {
 
   const handleSelectMatch = async (matchId) => {
     try {
-      const data = await getMatchSummary(matchId); // 💡 Usamos la vía rápida a la BD
+      const data = await getMatchSummary(matchId); 
       setSelectedMatch(data.metadata);
       setResumen(data.resumen);
     } catch (error) {
       alert("Error al cargar los datos del partido");
+    }
+  };
+
+  // 💡 Función para exportar la tabla a PDF
+  const handleDownloadPdf = async () => {
+    const element = printRef.current;
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      
+      const fileName = `Sesion_${selectedMatch.name.replace(/\s+/g, '_')}.pdf`;
+      pdf.save(fileName);
+    } catch (error) {
+      alert("Error al generar el PDF");
+      console.error(error);
     }
   };
 
@@ -62,49 +90,63 @@ function Sesiones() {
           </div>
         ) : (
           <div>
-            <h2 style={{ margin: "0 0 5px 0", color: "#2c3e50", fontSize: "28px" }}>{selectedMatch.name}</h2>
-            <p style={{ color: "#7f8c8d", marginBottom: "30px" }}>Desglose de rendimiento táctico y físico por períodos.</p>
+            {/* 💡 Cabecera con título y botón de descarga alineados */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "30px" }}>
+              <div>
+                <h2 style={{ margin: "0 0 5px 0", color: "#2c3e50", fontSize: "28px" }}>{selectedMatch.name}</h2>
+                <p style={{ color: "#7f8c8d", margin: 0 }}>Desglose de rendimiento táctico y físico por períodos.</p>
+              </div>
+              <button 
+                onClick={handleDownloadPdf}
+                style={{ padding: "10px 20px", backgroundColor: "#e74c3c", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                📄 Descargar PDF
+              </button>
+            </div>
             
-            <table style={{ width: "100%", borderCollapse: "collapse", color: "#333" }}>
-              <thead>
-                <tr style={{ backgroundColor: "#34495e", color: "white" }}>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Jugador</th>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Período</th>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Distancia (m)</th>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Vel. Máx (m/s)</th>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Sprints</th>
-                  <th style={{ padding: "12px", border: "1px solid #ddd" }}>Aceleraciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(resumen).map(([dev, playerStats]) => (
-                  <React.Fragment key={dev}>
-                    <tr style={{ backgroundColor: "#fdfdfd" }}>
-                      <td rowSpan="3" style={{ textAlign: "center", fontWeight: "bold", border: "1px solid #ddd" }}>Dorsal {dev}</td>
-                      <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>1ª Parte</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.dist}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.max_v}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.sprints}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.acels}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>2ª Parte</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.dist}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.max_v}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.sprints}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.acels}</td>
-                    </tr>
-                    <tr style={{ backgroundColor: "#f1f8ff", fontWeight: "bold" }}>
-                      <td style={{ padding: "8px", border: "1px solid #ddd" }}>TOTAL</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.dist}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.max_v}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.sprints}</td>
-                      <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.acels}</td>
-                    </tr>
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+            {/* 💡 Contenedor referenciado que saldrá en el PDF */}
+            <div ref={printRef} style={{ backgroundColor: "white", padding: "10px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", color: "#333" }}>
+                <thead>
+                  <tr style={{ backgroundColor: "#34495e", color: "white" }}>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Jugador</th>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Período</th>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Distancia (m)</th>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Vel. Máx (m/s)</th>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Sprints</th>
+                    <th style={{ padding: "12px", border: "1px solid #ddd" }}>Aceleraciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(resumen).map(([dev, playerStats]) => (
+                    <React.Fragment key={dev}>
+                      <tr style={{ backgroundColor: "#fdfdfd" }}>
+                        <td rowSpan="3" style={{ textAlign: "center", fontWeight: "bold", border: "1px solid #ddd" }}>Dorsal {dev}</td>
+                        <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>1ª Parte</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.dist}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.max_v}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.sprints}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h1.acels}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "8px", border: "1px solid #ddd", color: "#7f8c8d" }}>2ª Parte</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.dist}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.max_v}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.sprints}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.h2.acels}</td>
+                      </tr>
+                      <tr style={{ backgroundColor: "#f1f8ff", fontWeight: "bold" }}>
+                        <td style={{ padding: "8px", border: "1px solid #ddd" }}>TOTAL</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.dist}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.max_v}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.sprints}</td>
+                        <td style={{ textAlign: "center", border: "1px solid #ddd" }}>{playerStats.total.acels}</td>
+                      </tr>
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
