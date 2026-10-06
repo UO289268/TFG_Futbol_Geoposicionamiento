@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { getClubPlayers, addPlayer } from "./api";
+import { getTeamPlayers, addPlayer } from "./api";
 import { useNavigate } from "react-router-dom";
 
 function Plantilla() {
@@ -15,7 +15,7 @@ function Plantilla() {
   async function fetchPlayers() {
     setCargando(true);
     try {
-      const data = await getClubPlayers();
+      const data = await getTeamPlayers();
       setJugadores(data);
     } catch (error) {
       console.error("Error al cargar la plantilla", error);

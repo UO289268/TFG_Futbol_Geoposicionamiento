@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { getFrames, uploadExcel, getSavedMatches, loadSavedMatch, deleteSavedMatch } from "./api";
+import { 
+  getFrames, 
+  uploadExcel, 
+  getSavedMatches, 
+  loadSavedMatch, 
+  deleteSavedMatch,
+  CATEGORIAS_UMBRALES,
+  getTeamPlayers
+} from "./api";
 import Pitch from "./Pitch";
 import Login from "./Login";
 import Layout from "./Layout";
 import SeleccionClub from "./SeleccionClub";
+import SeleccionEquipo from "./SeleccionEquipo";
 import Plantilla from "./Plantilla";
 import PlayerDashboard from "./PlayerDashboard";
 import TeamComparison from "./TeamComparison";
@@ -18,7 +27,6 @@ const DEFAULT_ROLES = [
 ];
 
 function App() {
-  // --- ESTADOS DE AUTENTICACIÓN Y MULTITENANCY ---
   const [user, setUser] = useState(null);
   const navigate = useNavigate();
 
@@ -27,7 +35,11 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Comprobar si hay sesión iniciada al cargar
+  const [activeTeam, setActiveTeam] = useState(() => {
+    const saved = localStorage.getItem("activeTeam");
+    return saved ? JSON.parse(saved) : null;
+  });
+
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
     if (savedUser) {
@@ -40,12 +52,15 @@ function App() {
     localStorage.removeItem("user");
     localStorage.removeItem("activeClub");
     localStorage.removeItem("activeClubId");
+    localStorage.removeItem("activeTeam");
+    localStorage.removeItem("activeTeamId");
+    localStorage.removeItem("activeTeamCategory");
     setUser(null);
     setActiveClub(null);
+    setActiveTeam(null);
     navigate("/login");
   };
 
-  // --- ESTADOS ORIGINALES DEL SIMULADOR ---
   const [appMode, setAppMode] = useState("menu");
 
   const [players, setPlayers] = useState({});
@@ -70,8 +85,13 @@ function App() {
   const [selectedField, setSelectedField] = useState("");
   const [fieldLimits, setFieldLimits] = useState(null);
   const [showLines, setShowLines] = useState(false);
+  
   const [thresholds, setThresholds] = useState({ sprint: 24.0, hsr: 21.0, acel: 3.0 });
+  const [teamCategory, setTeamCategory] = useState("Categoría Desconocida");
   const [activeConfig, setActiveConfig] = useState(null);
+
+  const [teamPlayers, setTeamPlayers] = useState([]);
+  const [lineup, setLineup] = useState({});
 
   const [savedMatches, setSavedMatches] = useState([]);
 
@@ -85,12 +105,28 @@ function App() {
 
   const [selectedPeriod, setSelectedPeriod] = useState("total");
 
-  // --- LÓGICA DE DATOS ---
+  useEffect(() => {
+    if (appMode === "new") {
+      const category = localStorage.getItem("activeTeamCategory");
+      if (category && CATEGORIAS_UMBRALES[category]) {
+        setTeamCategory(category);
+        setThresholds({
+          sprint: CATEGORIAS_UMBRALES[category].sprint,
+          hsr: CATEGORIAS_UMBRALES[category].hsr,
+          acel: CATEGORIAS_UMBRALES[category].acel
+        });
+      }
+      getTeamPlayers().then(setTeamPlayers).catch(console.error);
+    }
+  }, [appMode, activeTeam]);
+
   const setupData = (data) => {
     setPlayers(data.players);
     setResumen(data.resumen);
     setFieldLimits(data.field_limits);
     setActiveConfig(data.config);
+
+    const savedLineup = data.alineacion || {};
 
     let max = 0;
     Object.values(data.players).forEach(p => {
@@ -104,9 +140,14 @@ function App() {
       setSelectedHeatPlayer(firstPlayer);
 
       const initialRoles = {};
-      Object.keys(data.players).forEach(d => initialRoles[d] = "Banquillo");
+      const initialVisible = [];
+      Object.keys(data.players).forEach(d => {
+        const role = savedLineup[d] || "Banquillo";
+        initialRoles[d] = role;
+        if (role !== "Banquillo") initialVisible.push(d); 
+      });
       setPlayerRoles(initialRoles);
-      setVisiblePlayers([]);
+      setVisiblePlayers(initialVisible);
     }
     setSelectedPeriod("total");
     setFrame(0);
@@ -135,7 +176,7 @@ function App() {
     setUploading(true);
     setError(null);
     try {
-      await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds);
+      await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds, lineup);
       const data = await getFrames();
       setupData(data);
     } catch (err) { setError(err.message || "Error al procesar"); }
@@ -229,15 +270,15 @@ function App() {
   const getHeatmapData = () => {
     if (heatmapMode === "none" || !players || Object.keys(players).length === 0) return [];
     let filteredPlayers = [];
-    if (heatmapMode === "team") filteredPlayers = Object.keys(players).filter(dev => playerRoles[dev] !== "Banquillo");
-    else if (heatmapMode === "role") filteredPlayers = Object.keys(players).filter(dev => playerRoles[dev] === selectedHeatRole);
+    
+    // 💡 Hemos eliminado la opción "team"
+    if (heatmapMode === "role") filteredPlayers = Object.keys(players).filter(dev => playerRoles[dev] === selectedHeatRole);
     else if ((heatmapMode === "player" || heatmapMode === "zones") && selectedHeatPlayer) filteredPlayers = [selectedHeatPlayer];
 
     const startFrame = selectedPeriod === "h2" ? (activeConfig?.h1_frames || 0) : 0;
     return filteredPlayers.flatMap(dev => players[dev].slice(startFrame, frame + 1).filter(p => p !== null));
   };
 
-  // --- RENDERIZADO DEL CONTENIDO PROTEGIDO ---
   const renderAppContent = () => {
     if (appMode === "menu") {
       return (
@@ -332,13 +373,40 @@ function App() {
                   </div>
                 </div>
                 <div style={{ backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
-                  <h4 style={{ margin: "0 0 15px 0", color: "#2c3e50" }}>5. Umbrales</h4>
+                  <h4 style={{ margin: "0 0 15px 0", color: "#2c3e50" }}>5. Umbrales Físicos ({teamCategory})</h4>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
-                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Sprint (km/h)</label><input type="number" step="0.1" value={thresholds.sprint} onChange={(e) => setThresholds({ ...thresholds, sprint: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
-                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>HSR (km/h)</label><input type="number" step="0.1" value={thresholds.hsr} onChange={(e) => setThresholds({ ...thresholds, hsr: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
-                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Acel (m/s²)</label><input type="number" step="0.1" value={thresholds.acel} onChange={(e) => setThresholds({ ...thresholds, acel: e.target.value })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
+                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Sprint (km/h)</label><input type="number" step="0.1" value={thresholds.sprint} onChange={(e) => setThresholds({ ...thresholds, sprint: parseFloat(e.target.value) })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
+                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>HSR (km/h)</label><input type="number" step="0.1" value={thresholds.hsr} onChange={(e) => setThresholds({ ...thresholds, hsr: parseFloat(e.target.value) })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
+                    <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Acel (m/s²)</label><input type="number" step="0.1" value={thresholds.acel} onChange={(e) => setThresholds({ ...thresholds, acel: parseFloat(e.target.value) })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
                   </div>
+                  <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "#95a5a6" }}>
+                    * Valores basados en la literatura científica para esta categoría. Puedes modificarlos manualmente.
+                  </p>
                 </div>
+                
+                {/* 💡 ALINEACIÓN TITULAR */}
+                <div style={{ backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
+                  <h4 style={{ margin: "0 0 15px 0", color: "#2c3e50" }}>6. Alineación Titular (Opcional)</h4>
+                  {teamPlayers.length === 0 ? (
+                    <p style={{ fontSize: "13px", color: "#e74c3c", margin: 0 }}>⚠️ No hay jugadoras en la plantilla. Añádelas desde la pestaña Plantilla para hacer la alineación.</p>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                      {teamPlayers.map(p => (
+                        <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px", backgroundColor: "white", borderRadius: "4px", border: "1px solid #ccc" }}>
+                          <span style={{ fontSize: "14px", fontWeight: "bold", color: "#34495e" }}>{p.dorsal} - {p.name}</span>
+                          <select 
+                            value={lineup[p.dorsal] || "Banquillo"} 
+                            onChange={(e) => setLineup({ ...lineup, [p.dorsal]: e.target.value })}
+                            style={{ padding: "4px", borderRadius: "4px", border: "1px solid #bdc3c7", cursor: "pointer", fontWeight: "bold" }}
+                          >
+                            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <button onClick={processDataClick} style={{ padding: "15px", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: "5px", fontSize: "18px", fontWeight: "bold", cursor: "pointer" }}>Guardar y Empezar ▶</button>
               </div>
             )}
@@ -348,7 +416,6 @@ function App() {
       );
     }
 
-    // --- RENDERIZADO DEL SIMULADOR ---
     const startFrame = selectedPeriod === "h2" ? (activeConfig?.h1_frames || 0) : 0;
     const endFrame = selectedPeriod === "h1" ? (activeConfig?.h1_frames || maxFrames) : maxFrames;
     const maxSliderValue = endFrame > 0 ? endFrame - 1 : 0;
@@ -379,7 +446,6 @@ function App() {
             if (v > stats.maxVel) stats.maxVel = v;
             stats.distance += distFrame;
             
-            // Sumamos el Player Load real del fotograma generado por el backend
             stats.playerLoad += (frameData.pl || 0);
 
             if (frameData.zona === "Sprint" || frameData.zona === "HSR") stats.hsrDist += distFrame;
@@ -420,7 +486,6 @@ function App() {
                 <h2 style={{ color: "#2c3e50", margin: 0 }}>Métricas del Equipo (Partido Completo)</h2>
               </div>
 
-              {/* El periodo se queda fijo en "total" para mostrar siempre todo el partido */}
               <TeamComparison resumen={resumen} period="total" />
               
             </div>
@@ -511,12 +576,11 @@ function App() {
 
           <div style={{ marginBottom: "20px", padding: "15px", backgroundColor: "#f8f9fa", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
             <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#34495e" }}>Visualizar Análisis Espacial</h4>
-            <select value={heatmapMode} onChange={(e) => setHeatmapMode(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", marginBottom: heatmapMode !== "none" && heatmapMode !== "team" ? "10px" : "0", cursor: "pointer", fontWeight: "bold" }}>
+            <select value={heatmapMode} onChange={(e) => setHeatmapMode(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", marginBottom: heatmapMode !== "none" ? "10px" : "0", cursor: "pointer", fontWeight: "bold" }}>
               <option value="none">❌ Apagado</option>
-              <option value="team">🌍 Mancha: Todo el Equipo</option>
-              <option value="role">👥 Mancha: Por Línea / Posición</option>
-              <option value="player">👤 Mancha: Jugador Individual</option>
-              <option value="zones">🔢 18 Zonas: Jugador Individual</option>
+              <option value="role">👥 Mapa de Calor: Por Línea / Posición</option>
+              <option value="player">👤 Mapa de Calor: Jugador Individual</option>
+              <option value="zones">🔢 18 Zonas (Mapa de Calor)</option>
             </select>
             {heatmapMode === "role" && (
               <select value={selectedHeatRole} onChange={(e) => setSelectedHeatRole(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid #ccc", cursor: "pointer" }}>
@@ -575,76 +639,80 @@ function App() {
     );
   };
 
-  // --- ESTRUCTURA DEL ROUTER PRINCIPAL PROTEGIDO ---
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/inicio" /> : <Login onLogin={setUser} />} />
       
-      {/* Redirección raíz */}
       {user && (
         <Route path="/" element={<Navigate to="/inicio" />} />
       )}
       
-      {/* PANTALLA DE SELECCIÓN DE EQUIPO */}
-      {user && (
+      {user && !activeClub && (
         <Route path="/inicio" element={
-          <Layout user={user} activeClub={activeClub} onLogout={handleLogout}>
+          <Layout user={user} activeClub={null} activeTeam={null} onLogout={handleLogout}>
             <SeleccionClub onSelectClub={(club) => {
-              // 1. Guardamos el nuevo club
               setActiveClub(club);
               localStorage.setItem("activeClub", JSON.stringify(club));
               localStorage.setItem("activeClubId", club.id);
+            }} />
+          </Layout>
+        } />
+      )}
+
+      {user && activeClub && !activeTeam && (
+        <Route path="/inicio" element={
+          <Layout user={user} activeClub={activeClub} activeTeam={null} onLogout={handleLogout}>
+            <SeleccionEquipo onTeamSelect={(team) => {
+              setActiveTeam(team);
+              localStorage.setItem("activeTeam", JSON.stringify(team));
               
-              // 2. 💡 LIMPIAMOS LA MEMORIA DEL PARTIDO ANTERIOR
               setAppMode("menu");
               setPlayers({});
               setResumen(null);
               setFrame(0);
               
-              // 3. Vamos a la pantalla principal
               navigate("/app");
             }} />
           </Layout>
         } />
       )}
 
-      {/* RUTA PROTEGIDA (PLANTILLA) */}
+      {user && activeClub && activeTeam && (
+        <Route path="/inicio" element={<Navigate to="/app" />} />
+      )}
+
       {user && (
         <Route path="/plantilla" element={
-          activeClub 
-            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><Plantilla /></Layout>
+          activeTeam 
+            ? <Layout user={user} activeClub={activeClub} activeTeam={activeTeam} onLogout={handleLogout}><Plantilla /></Layout>
             : <Navigate to="/inicio" />
         } />
       )}
 
-      {/* RUTA PROTEGIDA (SESIONES) */}
       {user && (
         <Route path="/sesiones" element={
-          activeClub 
-            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><Sesiones /></Layout>
+          activeTeam 
+            ? <Layout user={user} activeClub={activeClub} activeTeam={activeTeam} onLogout={handleLogout}><Sesiones /></Layout>
             : <Navigate to="/inicio" />
         } />
       )}
 
-      {/* RUTA PROTEGIDA (SIMULADOR) */}
       {user && (
         <Route path="/app" element={
-          activeClub 
-            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}>{renderAppContent()}</Layout>
+          activeTeam 
+            ? <Layout user={user} activeClub={activeClub} activeTeam={activeTeam} onLogout={handleLogout}>{renderAppContent()}</Layout>
             : <Navigate to="/inicio" />
         } />
       )}
 
-      {/* RUTA PROTEGIDA (DASHBOARD INDIVIDUAL) */}
       {user && (
         <Route path="/jugador/:id" element={
-          activeClub 
-            ? <Layout user={user} activeClub={activeClub} onLogout={handleLogout}><PlayerDashboard /></Layout>
+          activeTeam 
+            ? <Layout user={user} activeClub={activeClub} activeTeam={activeTeam} onLogout={handleLogout}><PlayerDashboard /></Layout>
             : <Navigate to="/inicio" />
         } />
       )}
 
-      {/* Redirección por defecto si no está logueado o la ruta no existe */}
       <Route path="*" element={<Navigate to="/login" />} />
     </Routes>
   );
