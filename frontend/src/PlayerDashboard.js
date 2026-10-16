@@ -115,7 +115,8 @@ function PlayerDashboard() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "20px", marginBottom: "30px" }}>
                     <KpiCard title="MINUTOS JUGADOS" value={`${currentKpis.minutos} min`} />
                     <KpiCard title="DISTANCIA TOTAL" value={`${currentKpis.distancia} m`} />
-                    <KpiCard title="VELOCIDAD MÁXIMA" value={`${currentKpis.vmax} km/h`} />
+                    <KpiCard title="VELOCIDAD MÁXIMA" value={`${(currentKpis.vmax * 3.6).toFixed(1)} km/h`} />
+                    <KpiCard title="DISTANCIA RELATIVA" value={`${currentKpis.distRelativa} m/min`} />
                     <KpiCard title="PLAYER LOAD" value={`${currentKpis.playerLoad} u.a.`} />
                     <KpiCard title="SPRINTS" value={currentKpis.sprints} />
                     <KpiCard title="DISTANCIA HSR" value={`${currentKpis.hsr} m`} />

@@ -21,7 +21,8 @@ function TeamComparison({ resumen, period }) {
                 const name = dbPlayer ? dbPlayer.name : `Dorsal ${dorsal}`;
                 chartData.push({
                     name: name,
-                    value: stats[metricKey]
+                    // max_v se guarda en m/s; se muestra en km/h
+                    value: metricKey === 'max_v' ? +(stats[metricKey] * 3.6).toFixed(1) : stats[metricKey]
                 });
             }
         });

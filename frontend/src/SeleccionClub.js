@@ -34,7 +34,7 @@ function SeleccionClub({ onSelectClub }) {
   // 💡 NUEVO: Función para eliminar el club
   const handleDeleteClub = async (e, clubId, clubNombre) => {
     e.stopPropagation(); // Evita que se dispare el click de la tarjeta (entrar al club)
-    if (window.confirm(`⚠️ ¿Estás seguro de que quieres eliminar el club "${clubNombre}" y todos sus datos?`)) {
+    if (window.confirm(`⚠️ ¿Estás seguro de que quieres eliminar el club "${clubNombre}" y todos sus equipos, jugadoras y partidos?`)) {
       try {
         await deleteClub(clubId);
         setLoading(true);

@@ -28,8 +28,6 @@ app.add_middleware(
 SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
 ALGORITHM = "HS256"
 
-datos_partido = None
-
 CAMPOS_FILE = "data/campos.json"
 MATCHES_DIR = "data/matches"
 os.makedirs(MATCHES_DIR, exist_ok=True)
@@ -134,12 +132,19 @@ def create_team(club_id: int, name: str = Form(...), category: str = Form(...), 
     db.add(new_team)
     db.commit()
     db.refresh(new_team)
-    return {"status": "success", "team_id": new_team.id, "name": new_team.name}
+    return {"id": new_team.id, "name": new_team.name, "category": new_team.category, "club_id": new_team.club_id}
 
 @app.delete("/clubs/{club_id}")
 def delete_club(club_id: int, db: Session = Depends(get_db)):
     db_club = db.query(models.Club).filter(models.Club.id == club_id).first()
     if db_club:
+        # Borrado de los equipos del club (y, por cascada del ORM, sus jugadoras y partidos)
+        for team in db.query(models.Team).filter(models.Team.club_id == club_id).all():
+            for match in team.matches:
+                path = os.path.join(MATCHES_DIR, f"{match.id}.json")
+                if os.path.exists(path):
+                    os.remove(path)
+            db.delete(team)
         db.delete(db_club)
         db.commit()
     return {"status": "success"}
@@ -193,13 +198,11 @@ def get_saved_matches(team_id: int, db: Session = Depends(get_db)):
 
 @app.get("/matches/{match_id}")
 def load_match(match_id: str):
-    global datos_partido
     path = os.path.join(MATCHES_DIR, f"{match_id}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Partido no encontrado")
     with open(path, "r", encoding="utf-8") as f:
-        datos_partido = json.load(f)
-    return datos_partido
+        return json.load(f)
 
 @app.get("/matches/{match_id}/resumen")
 def get_match_summary(match_id: str, db: Session = Depends(get_db)):
@@ -231,7 +234,7 @@ def delete_match(match_id: str, db: Session = Depends(get_db)):
     return {"status": "success", "message": "Partido eliminado"}
 
 @app.post("/upload")
-async def upload_excel(
+def upload_excel(
     file: UploadFile = File(...),
     match_name: str = Form("Partido sin nombre"),
     field_id: str = Form(""), 
@@ -246,7 +249,6 @@ async def upload_excel(
     alineacion: str = Form("{}"), 
     db: Session = Depends(get_db)
 ):
-    global datos_partido
     try:
         alineacion_dict = json.loads(alineacion)
         ms_sprint = u_sprint / 3.6
@@ -260,7 +262,7 @@ async def upload_excel(
             "minLon": campo_select["lon_tl"], "maxLon": campo_select["lon_br"]
         } if campo_select else None
 
-        contents = await file.read()
+        contents = file.file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
         columnas_req = {'local_time', 'DEV', 'lat', 'lon', 'vel'}
@@ -296,12 +298,20 @@ async def upload_excel(
             df_jugador = df[df['DEV'] == dev].drop_duplicates(subset=['timestamp']).set_index('timestamp')
             df_sincronizado = df_jugador.reindex(rango_global)
             
-            df_sincronizado['vel_suavizada'] = df_sincronizado['vel'].rolling(window=3, min_periods=1).mean()
-            df_sincronizado['acc'] = df_sincronizado['vel_suavizada'].diff(periods=5) / 0.5
-            df_sincronizado['acc'] = df_sincronizado['acc'].rolling(window=5, min_periods=1).mean()
-            
-            df_sincronizado['jerk_abs'] = df_sincronizado['acc'].diff().abs()
-            df_sincronizado['pl_frame'] = df_sincronizado['jerk_abs'] * 0.02 
+            # La cinemática se calcula por separado en cada parte para que las
+            # diferencias y medias móviles no crucen el descanso entre partes.
+            def cinematica(d):
+                d = d.copy()
+                d['vel_suavizada'] = d['vel'].rolling(window=3, min_periods=1).mean()
+                d['acc'] = d['vel_suavizada'].diff(periods=5) / 0.5
+                d['acc'] = d['acc'].rolling(window=5, min_periods=1).mean()
+                d['jerk_abs'] = d['acc'].diff().abs()
+                d['pl_frame'] = d['jerk_abs'] * 0.02
+                return d
+
+            partes = [df_sincronizado.loc[df_sincronizado.index.isin(r)] for r in (rango_h1, rango_h2) if len(r) > 0]
+            df_sincronizado = pd.concat([cinematica(p) for p in partes])
+            df_sincronizado = df_sincronizado[~df_sincronizado.index.duplicated()]
             
             def get_period_stats(pdf):
                 if pdf.empty or pdf['vel'].isna().all():
@@ -477,9 +487,3 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
         "playerLoadAcumulado": player_load_acumulado,
         "zonasVelocidad": zonas_velocidad
     }
-
-@app.get("/frames")
-def get_frames():
-    if datos_partido is None:
-        raise HTTPException(status_code=404, detail="No hay archivo en memoria")
-    return datos_partidoh

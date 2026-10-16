@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { 
-  getFrames, 
   uploadExcel, 
   getSavedMatches, 
   loadSavedMatch, 
@@ -127,6 +126,8 @@ function App() {
     setActiveConfig(data.config);
 
     const savedLineup = data.alineacion || {};
+    // Si no se indicó alineación, todas las jugadoras empiezan visibles en el campo
+    const sinAlineacion = Object.keys(savedLineup).length === 0;
 
     let max = 0;
     Object.values(data.players).forEach(p => {
@@ -142,7 +143,7 @@ function App() {
       const initialRoles = {};
       const initialVisible = [];
       Object.keys(data.players).forEach(d => {
-        const role = savedLineup[d] || "Banquillo";
+        const role = savedLineup[d] || (sinAlineacion ? "Medio" : "Banquillo");
         initialRoles[d] = role;
         if (role !== "Banquillo") initialVisible.push(d); 
       });
@@ -201,7 +202,7 @@ function App() {
   };
 
   const handleDeleteMatch = async (matchId) => {
-    if (window.confirm("⚠️ ¿Estás seguro de que quieres eliminar este partido? Esta acción borrará el archivo de tu ordenador y no se puede deshacer.")) {
+    if (window.confirm("⚠️ ¿Estás seguro de que quieres eliminar este partido? Esta acción borrará el partido del servidor y no se puede deshacer.")) {
       try {
         await deleteSavedMatch(matchId);
         fetchMatchesList();
@@ -341,7 +342,7 @@ function App() {
             {uploading ? (
               <div style={{ textAlign: "center" }}>
                 <h3 style={{ color: "#f1c40f" }}>Procesando y Guardando...</h3>
-                <p style={{ fontSize: "14px", color: "#7f8c8d" }}>Esto puede tardar unos segundos. Se guardará automáticamente.</p>
+                <p style={{ fontSize: "14px", color: "#7f8c8d" }}>Con archivos grandes puede tardar un par de minutos. No cierres la ventana; se guardará automáticamente.</p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
@@ -351,7 +352,7 @@ function App() {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
                   <h4 style={{ margin: 0, color: "#2c3e50", flex: 1 }}>2. Archivo GPS (.xlsx)</h4>
-                  <input type="file" accept=".xlsx, .xls" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
+                  <input type="file" accept=".xlsx" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
                   <label htmlFor="excel-upload" style={{ padding: "10px 20px", backgroundColor: selectedFile ? "#2980b9" : "#7f8c8d", color: "white", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
                     {selectedFile ? `✅ ${selectedFile.name}` : "📁 Seleccionar"}
                   </label>
@@ -380,7 +381,7 @@ function App() {
                     <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Acel (m/s²)</label><input type="number" step="0.1" value={thresholds.acel} onChange={(e) => setThresholds({ ...thresholds, acel: parseFloat(e.target.value) })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
                   </div>
                   <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "#95a5a6" }}>
-                    * Valores basados en la literatura científica para esta categoría. Puedes modificarlos manualmente.
+                    * Valores orientativos para esta categoría (no validados). Puedes modificarlos manualmente.
                   </p>
                 </div>
                 
@@ -520,7 +521,7 @@ function App() {
                 ))}
               </div>
 
-              <input type="range" min={startFrame} max={maxSliderValue} value={frame} onChange={(e) => setFrame(Number(e.target.value))} style={{ flexGrow: 1, cursor: "pointer" }} />
+              <input type="range" min={startFrame} max={maxSliderValue} value={frame} onChange={(e) => { setIsPlaying(false); setFrame(Number(e.target.value)); }} style={{ flexGrow: 1, cursor: "pointer" }} />
 
               <div style={{ fontFamily: "monospace", minWidth: "150px", textAlign: "right", fontSize: "16px", fontWeight: "bold" }}>
                 <span style={{ color: "#007bff" }}>{formatTimeDynamic(frame)}</span>

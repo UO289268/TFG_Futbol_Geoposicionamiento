@@ -37,15 +37,6 @@ export async function deleteClub(clubId) {
     return await response.json();
 }
 
-export async function getFrames() {
-    const response = await fetch(`${API_URL}/frames`);
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Error al obtener los datos");
-    }
-    return await response.json();
-}
-
 export async function uploadExcel(file, matchName, times, fieldId, thresholds, lineup) {
     const teamId = localStorage.getItem("activeTeamId"); 
     if (!teamId) throw new Error("No has seleccionado un equipo activo");

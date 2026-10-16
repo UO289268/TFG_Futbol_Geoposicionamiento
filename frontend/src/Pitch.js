@@ -1,5 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import fieldImg from "./field.png";
+
+const BRUSH_RADIUS = 25;
 
 const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed, heatmapMode, heatmapData }) => {
     const canvasRef = useRef(null);
@@ -13,7 +15,24 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
 
-    // --- LÓGICA DEL MAPA DE CALOR ULTRA-OPTIMIZADA ---
+    // "Sello" del mapa de calor: lienzo auxiliar no visible con el degradado
+    // radial, creado una sola vez y reutilizado en cada repintado.
+    const brushCanvas = useMemo(() => {
+        const c = document.createElement("canvas");
+        c.width = BRUSH_RADIUS * 2;
+        c.height = BRUSH_RADIUS * 2;
+        const bCtx = c.getContext("2d");
+        const gradient = bCtx.createRadialGradient(BRUSH_RADIUS, BRUSH_RADIUS, 0, BRUSH_RADIUS, BRUSH_RADIUS, BRUSH_RADIUS);
+        gradient.addColorStop(0, "rgba(255, 30, 0, 0.025)");
+        gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
+        bCtx.fillStyle = gradient;
+        bCtx.beginPath();
+        bCtx.arc(BRUSH_RADIUS, BRUSH_RADIUS, BRUSH_RADIUS, 0, Math.PI * 2);
+        bCtx.fill();
+        return c;
+    }, []);
+
+    // --- LÓGICA DEL MAPA DE CALOR ---
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -23,21 +42,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
 
         if (heatmapMode === "zones" || !heatmapData || heatmapData.length === 0) return;
 
-        // 💡 OPTIMIZACIÓN EXTREMA: Creamos un "Sello" (Offscreen Canvas)
-        const brushRadius = 25;
-        const brushCanvas = document.createElement("canvas");
-        brushCanvas.width = brushRadius * 2;
-        brushCanvas.height = brushRadius * 2;
-        const bCtx = brushCanvas.getContext("2d");
-
-        // Dibujamos el degradado solo 1 vez en este mini-lienzo invisible
-        const gradient = bCtx.createRadialGradient(brushRadius, brushRadius, 0, brushRadius, brushRadius, brushRadius);
-        gradient.addColorStop(0, "rgba(255, 30, 0, 0.025)"); // Ligeramente más suave porque ahora pintamos más rápido
-        gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
-        bCtx.fillStyle = gradient;
-        bCtx.beginPath();
-        bCtx.arc(brushRadius, brushRadius, brushRadius, 0, Math.PI * 2);
-        bCtx.fill();
+        const brushRadius = BRUSH_RADIUS;
 
         // 💡 "Estampamos" el sello miles de veces usando GPU directamente
         heatmapData.forEach(pos => {
@@ -48,7 +53,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
         });
 
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode]);
+    }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode, brushCanvas]);
 
     if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
     if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
