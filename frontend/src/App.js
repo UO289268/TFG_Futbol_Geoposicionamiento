@@ -176,8 +176,8 @@ function App() {
     setUploading(true);
     setError(null);
     try {
-      await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds, lineup);
-      const data = await getFrames();
+      const { match_id } = await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds, lineup);
+      const data = await loadSavedMatch(match_id);
       setupData(data);
     } catch (err) { setError(err.message || "Error al procesar"); }
     finally { setUploading(false); }
