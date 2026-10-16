@@ -1,0 +1,767 @@
+From d39b09239b592eb2e10db56300348faadffb5cf5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Mario=20San=20Jos=C3=A9?= <mariosanjose03@gmail.com>
+Date: Fri, 16 Oct 2026 11:38:43 +0200
+Subject: [PATCH] Corregir fallos detectados al revisar la memoria
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Procesar nuevo partido: el cliente abre el partido con /matches/{id}
+  usando el match_id devuelto; se eliminan /frames (fallaba por la errata
+  datos_partidoh) y la variable global datos_partido.
+- /upload deja de ser async para no bloquear el servidor durante el
+  procesamiento.
+- Cinemática (suavizado, aceleración, Player Load) calculada por separado
+  en cada parte para no cruzar el descanso.
+- POST /club/{id}/teams devuelve id y category; un equipo recién creado
+  se puede seleccionar sin recargar.
+- Borrar un club borra sus equipos, jugadoras, partidos y ficheros.
+- Velocidad máxima mostrada en km/h en el dashboard y la comparativa.
+- Dashboard: se muestra la distancia relativa.
+- Simulador: arrastrar la barra pausa; sin alineación, todas las
+  jugadoras empiezan visibles; sello del mapa de calor creado una vez.
+- Textos de la interfaz corregidos (umbrales orientativos, tiempo de
+  carga, borrado, solo .xlsx).
+- Limpieza: Sidebar.js y App.test.js sin uso, __pycache__ fuera del
+  repositorio, .gitignore permite subir data/campos.json e ignora *.db,
+  requirements.txt en UTF-8 con SQLAlchemy, bcrypt, PyJWT y
+  python-multipart.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01ABJjNhnt3hTaNnBh3ECELS
+---
+ .gitignore                               |   4 +-
+ backend/__pycache__/main.cpython-313.pyc | Bin 28068 -> 0 bytes
+ backend/main.py                          |  46 ++++++++++----------
+ frontend/src/App.js                      |  19 +++++----
+ frontend/src/App.test.js                 |   8 ----
+ frontend/src/Pitch.js                    |  41 ++++++++++--------
+ frontend/src/PlayerDashboard.js          |   3 +-
+ frontend/src/SeleccionClub.js            |   2 +-
+ frontend/src/Sidebar.js                  |  51 -----------------------
+ frontend/src/TeamComparison.js           |   3 +-
+ frontend/src/api.js                      |   9 ----
+ requirements.txt                         | Bin 780 -> 431 bytes
+ 12 files changed, 66 insertions(+), 120 deletions(-)
+ delete mode 100644 backend/__pycache__/main.cpython-313.pyc
+ delete mode 100644 frontend/src/App.test.js
+ delete mode 100644 frontend/src/Sidebar.js
+
+diff --git a/.gitignore b/.gitignore
+index edbd89c..79c6b1d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -9,7 +9,9 @@ venv/
+ __pycache__/
+ *.pyc
+ .env
+-backend/data/
++backend/data/*
++!backend/data/campos.json
++*.db
+ 
+ # --- Otros ---
+ .DS_Store
+\ No newline at end of file
+diff --git a/backend/__pycache__/main.cpython-313.pyc b/backend/__pycache__/main.cpython-313.pyc
+deleted file mode 100644
+index bf0275c131179f3b100e87a0f58b02299e7dc8a8..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 28068
+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
+R5>e7Qn4JDd0U@%8{(n#vpVj~X
+
+diff --git a/backend/main.py b/backend/main.py
+index 6d74410..496e375 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -28,8 +28,6 @@ app.add_middleware(
+ SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
+ ALGORITHM = "HS256"
+ 
+-datos_partido = None
+-
+ CAMPOS_FILE = "data/campos.json"
+ MATCHES_DIR = "data/matches"
+ os.makedirs(MATCHES_DIR, exist_ok=True)
+@@ -134,12 +132,19 @@ def create_team(club_id: int, name: str = Form(...), category: str = Form(...),
+     db.add(new_team)
+     db.commit()
+     db.refresh(new_team)
+-    return {"status": "success", "team_id": new_team.id, "name": new_team.name}
++    return {"id": new_team.id, "name": new_team.name, "category": new_team.category, "club_id": new_team.club_id}
+ 
+ @app.delete("/clubs/{club_id}")
+ def delete_club(club_id: int, db: Session = Depends(get_db)):
+     db_club = db.query(models.Club).filter(models.Club.id == club_id).first()
+     if db_club:
++        # Borrado de los equipos del club (y, por cascada del ORM, sus jugadoras y partidos)
++        for team in db.query(models.Team).filter(models.Team.club_id == club_id).all():
++            for match in team.matches:
++                path = os.path.join(MATCHES_DIR, f"{match.id}.json")
++                if os.path.exists(path):
++                    os.remove(path)
++            db.delete(team)
+         db.delete(db_club)
+         db.commit()
+     return {"status": "success"}
+@@ -193,13 +198,11 @@ def get_saved_matches(team_id: int, db: Session = Depends(get_db)):
+ 
+ @app.get("/matches/{match_id}")
+ def load_match(match_id: str):
+-    global datos_partido
+     path = os.path.join(MATCHES_DIR, f"{match_id}.json")
+     if not os.path.exists(path):
+         raise HTTPException(status_code=404, detail="Partido no encontrado")
+     with open(path, "r", encoding="utf-8") as f:
+-        datos_partido = json.load(f)
+-    return datos_partido
++        return json.load(f)
+ 
+ @app.get("/matches/{match_id}/resumen")
+ def get_match_summary(match_id: str, db: Session = Depends(get_db)):
+@@ -231,7 +234,7 @@ def delete_match(match_id: str, db: Session = Depends(get_db)):
+     return {"status": "success", "message": "Partido eliminado"}
+ 
+ @app.post("/upload")
+-async def upload_excel(
++def upload_excel(
+     file: UploadFile = File(...),
+     match_name: str = Form("Partido sin nombre"),
+     field_id: str = Form(""), 
+@@ -246,7 +249,6 @@ async def upload_excel(
+     alineacion: str = Form("{}"), 
+     db: Session = Depends(get_db)
+ ):
+-    global datos_partido
+     try:
+         alineacion_dict = json.loads(alineacion)
+         ms_sprint = u_sprint / 3.6
+@@ -260,7 +262,7 @@ async def upload_excel(
+             "minLon": campo_select["lon_tl"], "maxLon": campo_select["lon_br"]
+         } if campo_select else None
+ 
+-        contents = await file.read()
++        contents = file.file.read()
+         df = pd.read_excel(io.BytesIO(contents))
+         
+         columnas_req = {'local_time', 'DEV', 'lat', 'lon', 'vel'}
+@@ -296,12 +298,20 @@ async def upload_excel(
+             df_jugador = df[df['DEV'] == dev].drop_duplicates(subset=['timestamp']).set_index('timestamp')
+             df_sincronizado = df_jugador.reindex(rango_global)
+             
+-            df_sincronizado['vel_suavizada'] = df_sincronizado['vel'].rolling(window=3, min_periods=1).mean()
+-            df_sincronizado['acc'] = df_sincronizado['vel_suavizada'].diff(periods=5) / 0.5
+-            df_sincronizado['acc'] = df_sincronizado['acc'].rolling(window=5, min_periods=1).mean()
+-            
+-            df_sincronizado['jerk_abs'] = df_sincronizado['acc'].diff().abs()
+-            df_sincronizado['pl_frame'] = df_sincronizado['jerk_abs'] * 0.02 
++            # La cinemática se calcula por separado en cada parte para que las
++            # diferencias y medias móviles no crucen el descanso entre partes.
++            def cinematica(d):
++                d = d.copy()
++                d['vel_suavizada'] = d['vel'].rolling(window=3, min_periods=1).mean()
++                d['acc'] = d['vel_suavizada'].diff(periods=5) / 0.5
++                d['acc'] = d['acc'].rolling(window=5, min_periods=1).mean()
++                d['jerk_abs'] = d['acc'].diff().abs()
++                d['pl_frame'] = d['jerk_abs'] * 0.02
++                return d
++
++            partes = [df_sincronizado.loc[df_sincronizado.index.isin(r)] for r in (rango_h1, rango_h2) if len(r) > 0]
++            df_sincronizado = pd.concat([cinematica(p) for p in partes])
++            df_sincronizado = df_sincronizado[~df_sincronizado.index.duplicated()]
+             
+             def get_period_stats(pdf):
+                 if pdf.empty or pdf['vel'].isna().all():
+@@ -477,9 +487,3 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
+         "playerLoadAcumulado": player_load_acumulado,
+         "zonasVelocidad": zonas_velocidad
+     }
+-
+-@app.get("/frames")
+-def get_frames():
+-    if datos_partido is None:
+-        raise HTTPException(status_code=404, detail="No hay archivo en memoria")
+-    return datos_partidoh
+\ No newline at end of file
+diff --git a/frontend/src/App.js b/frontend/src/App.js
+index b6475ca..174b0d1 100644
+--- a/frontend/src/App.js
++++ b/frontend/src/App.js
+@@ -1,7 +1,6 @@
+ import React, { useEffect, useState } from "react";
+ import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
+ import { 
+-  getFrames, 
+   uploadExcel, 
+   getSavedMatches, 
+   loadSavedMatch, 
+@@ -127,6 +126,8 @@ function App() {
+     setActiveConfig(data.config);
+ 
+     const savedLineup = data.alineacion || {};
++    // Si no se indicó alineación, todas las jugadoras empiezan visibles en el campo
++    const sinAlineacion = Object.keys(savedLineup).length === 0;
+ 
+     let max = 0;
+     Object.values(data.players).forEach(p => {
+@@ -142,7 +143,7 @@ function App() {
+       const initialRoles = {};
+       const initialVisible = [];
+       Object.keys(data.players).forEach(d => {
+-        const role = savedLineup[d] || "Banquillo";
++        const role = savedLineup[d] || (sinAlineacion ? "Medio" : "Banquillo");
+         initialRoles[d] = role;
+         if (role !== "Banquillo") initialVisible.push(d); 
+       });
+@@ -176,8 +177,8 @@ function App() {
+     setUploading(true);
+     setError(null);
+     try {
+-      await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds, lineup);
+-      const data = await getFrames();
++      const { match_id } = await uploadExcel(selectedFile, matchName, matchTimes, selectedField, thresholds, lineup);
++      const data = await loadSavedMatch(match_id);
+       setupData(data);
+     } catch (err) { setError(err.message || "Error al procesar"); }
+     finally { setUploading(false); }
+@@ -201,7 +202,7 @@ function App() {
+   };
+ 
+   const handleDeleteMatch = async (matchId) => {
+-    if (window.confirm("⚠️ ¿Estás seguro de que quieres eliminar este partido? Esta acción borrará el archivo de tu ordenador y no se puede deshacer.")) {
++    if (window.confirm("⚠️ ¿Estás seguro de que quieres eliminar este partido? Esta acción borrará el partido del servidor y no se puede deshacer.")) {
+       try {
+         await deleteSavedMatch(matchId);
+         fetchMatchesList();
+@@ -341,7 +342,7 @@ function App() {
+             {uploading ? (
+               <div style={{ textAlign: "center" }}>
+                 <h3 style={{ color: "#f1c40f" }}>Procesando y Guardando...</h3>
+-                <p style={{ fontSize: "14px", color: "#7f8c8d" }}>Esto puede tardar unos segundos. Se guardará automáticamente.</p>
++                <p style={{ fontSize: "14px", color: "#7f8c8d" }}>Con archivos grandes puede tardar un par de minutos. No cierres la ventana; se guardará automáticamente.</p>
+               </div>
+             ) : (
+               <div style={{ display: "flex", flexDirection: "column", gap: "25px" }}>
+@@ -351,7 +352,7 @@ function App() {
+                 </div>
+                 <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
+                   <h4 style={{ margin: 0, color: "#2c3e50", flex: 1 }}>2. Archivo GPS (.xlsx)</h4>
+-                  <input type="file" accept=".xlsx, .xls" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
++                  <input type="file" accept=".xlsx" onChange={(e) => setSelectedFile(e.target.files[0])} style={{ display: "none" }} id="excel-upload" />
+                   <label htmlFor="excel-upload" style={{ padding: "10px 20px", backgroundColor: selectedFile ? "#2980b9" : "#7f8c8d", color: "white", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
+                     {selectedFile ? `✅ ${selectedFile.name}` : "📁 Seleccionar"}
+                   </label>
+@@ -380,7 +381,7 @@ function App() {
+                     <div style={{ display: "flex", flexDirection: "column" }}><label style={{ fontSize: "11px", color: "#7f8c8d" }}>Acel (m/s²)</label><input type="number" step="0.1" value={thresholds.acel} onChange={(e) => setThresholds({ ...thresholds, acel: parseFloat(e.target.value) })} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #bdc3c7" }} /></div>
+                   </div>
+                   <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "#95a5a6" }}>
+-                    * Valores basados en la literatura científica para esta categoría. Puedes modificarlos manualmente.
++                    * Valores orientativos para esta categoría (no validados). Puedes modificarlos manualmente.
+                   </p>
+                 </div>
+                 
+@@ -520,7 +521,7 @@ function App() {
+                 ))}
+               </div>
+ 
+-              <input type="range" min={startFrame} max={maxSliderValue} value={frame} onChange={(e) => setFrame(Number(e.target.value))} style={{ flexGrow: 1, cursor: "pointer" }} />
++              <input type="range" min={startFrame} max={maxSliderValue} value={frame} onChange={(e) => { setIsPlaying(false); setFrame(Number(e.target.value)); }} style={{ flexGrow: 1, cursor: "pointer" }} />
+ 
+               <div style={{ fontFamily: "monospace", minWidth: "150px", textAlign: "right", fontSize: "16px", fontWeight: "bold" }}>
+                 <span style={{ color: "#007bff" }}>{formatTimeDynamic(frame)}</span>
+diff --git a/frontend/src/App.test.js b/frontend/src/App.test.js
+deleted file mode 100644
+index 1f03afe..0000000
+--- a/frontend/src/App.test.js
++++ /dev/null
+@@ -1,8 +0,0 @@
+-import { render, screen } from '@testing-library/react';
+-import App from './App';
+-
+-test('renders learn react link', () => {
+-  render(<App />);
+-  const linkElement = screen.getByText(/learn react/i);
+-  expect(linkElement).toBeInTheDocument();
+-});
+diff --git a/frontend/src/Pitch.js b/frontend/src/Pitch.js
+index c51a6b6..bc0380b 100644
+--- a/frontend/src/Pitch.js
++++ b/frontend/src/Pitch.js
+@@ -1,6 +1,8 @@
+-import React, { useEffect, useRef } from "react";
++import React, { useEffect, useMemo, useRef } from "react";
+ import fieldImg from "./field.png";
+ 
++const BRUSH_RADIUS = 25;
++
+ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fieldLimits, showLines, roles, speed, heatmapMode, heatmapData }) => {
+     const canvasRef = useRef(null);
+ 
+@@ -13,7 +15,24 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
+     const latToPx = lat => ((maxLat - lat) / (maxLat - minLat)) * heightPx;
+     const lonToPx = lon => ((lon - minLon) / (maxLon - minLon)) * widthPx;
+ 
+-    // --- LÓGICA DEL MAPA DE CALOR ULTRA-OPTIMIZADA ---
++    // "Sello" del mapa de calor: lienzo auxiliar no visible con el degradado
++    // radial, creado una sola vez y reutilizado en cada repintado.
++    const brushCanvas = useMemo(() => {
++        const c = document.createElement("canvas");
++        c.width = BRUSH_RADIUS * 2;
++        c.height = BRUSH_RADIUS * 2;
++        const bCtx = c.getContext("2d");
++        const gradient = bCtx.createRadialGradient(BRUSH_RADIUS, BRUSH_RADIUS, 0, BRUSH_RADIUS, BRUSH_RADIUS, BRUSH_RADIUS);
++        gradient.addColorStop(0, "rgba(255, 30, 0, 0.025)");
++        gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
++        bCtx.fillStyle = gradient;
++        bCtx.beginPath();
++        bCtx.arc(BRUSH_RADIUS, BRUSH_RADIUS, BRUSH_RADIUS, 0, Math.PI * 2);
++        bCtx.fill();
++        return c;
++    }, []);
++
++    // --- LÓGICA DEL MAPA DE CALOR ---
+     useEffect(() => {
+         const canvas = canvasRef.current;
+         if (!canvas) return;
+@@ -23,21 +42,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
+ 
+         if (heatmapMode === "zones" || !heatmapData || heatmapData.length === 0) return;
+ 
+-        // 💡 OPTIMIZACIÓN EXTREMA: Creamos un "Sello" (Offscreen Canvas)
+-        const brushRadius = 25;
+-        const brushCanvas = document.createElement("canvas");
+-        brushCanvas.width = brushRadius * 2;
+-        brushCanvas.height = brushRadius * 2;
+-        const bCtx = brushCanvas.getContext("2d");
+-
+-        // Dibujamos el degradado solo 1 vez en este mini-lienzo invisible
+-        const gradient = bCtx.createRadialGradient(brushRadius, brushRadius, 0, brushRadius, brushRadius, brushRadius);
+-        gradient.addColorStop(0, "rgba(255, 30, 0, 0.025)"); // Ligeramente más suave porque ahora pintamos más rápido
+-        gradient.addColorStop(1, "rgba(255, 30, 0, 0)");
+-        bCtx.fillStyle = gradient;
+-        bCtx.beginPath();
+-        bCtx.arc(brushRadius, brushRadius, brushRadius, 0, Math.PI * 2);
+-        bCtx.fill();
++        const brushRadius = BRUSH_RADIUS;
+ 
+         // 💡 "Estampamos" el sello miles de veces usando GPU directamente
+         heatmapData.forEach(pos => {
+@@ -48,7 +53,7 @@ const Pitch = ({ players, frame, visiblePlayers, selectedPlayer, playerRoles, fi
+         });
+ 
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+-    }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode]);
++    }, [heatmapData, maxLat, minLat, minLon, maxLon, heatmapMode, brushCanvas]);
+ 
+     if (!players || Object.keys(players).length === 0) return <div style={{ color: "white" }}>Loading players...</div>;
+     if (!fieldLimits) return <div style={{ color: "white" }}>Cargando dimensiones del campo...</div>;
+diff --git a/frontend/src/PlayerDashboard.js b/frontend/src/PlayerDashboard.js
+index cb863aa..2024451 100644
+--- a/frontend/src/PlayerDashboard.js
++++ b/frontend/src/PlayerDashboard.js
+@@ -115,7 +115,8 @@ function PlayerDashboard() {
+                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "20px", marginBottom: "30px" }}>
+                     <KpiCard title="MINUTOS JUGADOS" value={`${currentKpis.minutos} min`} />
+                     <KpiCard title="DISTANCIA TOTAL" value={`${currentKpis.distancia} m`} />
+-                    <KpiCard title="VELOCIDAD MÁXIMA" value={`${currentKpis.vmax} km/h`} />
++                    <KpiCard title="VELOCIDAD MÁXIMA" value={`${(currentKpis.vmax * 3.6).toFixed(1)} km/h`} />
++                    <KpiCard title="DISTANCIA RELATIVA" value={`${currentKpis.distRelativa} m/min`} />
+                     <KpiCard title="PLAYER LOAD" value={`${currentKpis.playerLoad} u.a.`} />
+                     <KpiCard title="SPRINTS" value={currentKpis.sprints} />
+                     <KpiCard title="DISTANCIA HSR" value={`${currentKpis.hsr} m`} />
+diff --git a/frontend/src/SeleccionClub.js b/frontend/src/SeleccionClub.js
+index 29b2fdb..8b22164 100644
+--- a/frontend/src/SeleccionClub.js
++++ b/frontend/src/SeleccionClub.js
+@@ -34,7 +34,7 @@ function SeleccionClub({ onSelectClub }) {
+   // 💡 NUEVO: Función para eliminar el club
+   const handleDeleteClub = async (e, clubId, clubNombre) => {
+     e.stopPropagation(); // Evita que se dispare el click de la tarjeta (entrar al club)
+-    if (window.confirm(`⚠️ ¿Estás seguro de que quieres eliminar el club "${clubNombre}" y todos sus datos?`)) {
++    if (window.confirm(`⚠️ ¿Estás seguro de que quieres eliminar el club "${clubNombre}" y todos sus equipos, jugadoras y partidos?`)) {
+       try {
+         await deleteClub(clubId);
+         setLoading(true);
+diff --git a/frontend/src/Sidebar.js b/frontend/src/Sidebar.js
+deleted file mode 100644
+index b192da1..0000000
+--- a/frontend/src/Sidebar.js
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import React from "react";
+-import { useLocation, useNavigate } from "react-router-dom";
+-
+-function Sidebar() {
+-  const location = useLocation();
+-  const navigate = useNavigate();
+-
+-  const menuItems = [
+-    { name: "Inicio", icon: "🏠", path: "/inicio" },
+-    { name: "Plantilla", icon: "👥", path: "/plantilla" },
+-    { name: "Análisis", icon: "📊", path: "/app" },
+-    { name: "Sesiones", icon: "📅", path: "/sesiones" },
+-  ];
+-
+-  return (
+-    <div style={{ width: "250px", backgroundColor: "#ffffff", borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100vh", position: "fixed", top: 0, left: 0 }}>
+-      <div style={{ padding: "20px", borderBottom: "1px solid #e0e0e0", textAlign: "center" }}>
+-        <h2 style={{ margin: 0, color: "#2c3e50", fontSize: "20px" }}>TFG Analytics</h2>
+-      </div>
+-      
+-      <div style={{ padding: "20px 0", flex: 1 }}>
+-        {menuItems.map(item => {
+-          const isActive = location.pathname.startsWith(item.path);
+-          return (
+-            <div 
+-              key={item.name} 
+-              onClick={() => navigate(item.path)}
+-              style={{ 
+-                padding: "15px 25px", 
+-                cursor: "pointer", 
+-                display: "flex", 
+-                alignItems: "center", 
+-                gap: "15px",
+-                backgroundColor: isActive ? "#eafaf1" : "transparent",
+-                color: isActive ? "#27ae60" : "#7f8c8d",
+-                borderRight: isActive ? "4px solid #27ae60" : "4px solid transparent",
+-                fontWeight: isActive ? "bold" : "normal",
+-                transition: "0.2s"
+-              }}
+-            >
+-              <span style={{ fontSize: "18px" }}>{item.icon}</span>
+-              {item.name}
+-            </div>
+-          );
+-        })}
+-      </div>
+-    </div>
+-  );
+-}
+-
+-export default Sidebar;
+\ No newline at end of file
+diff --git a/frontend/src/TeamComparison.js b/frontend/src/TeamComparison.js
+index 9abc896..1295118 100644
+--- a/frontend/src/TeamComparison.js
++++ b/frontend/src/TeamComparison.js
+@@ -21,7 +21,8 @@ function TeamComparison({ resumen, period }) {
+                 const name = dbPlayer ? dbPlayer.name : `Dorsal ${dorsal}`;
+                 chartData.push({
+                     name: name,
+-                    value: stats[metricKey]
++                    // max_v se guarda en m/s; se muestra en km/h
++                    value: metricKey === 'max_v' ? +(stats[metricKey] * 3.6).toFixed(1) : stats[metricKey]
+                 });
+             }
+         });
+diff --git a/frontend/src/api.js b/frontend/src/api.js
+index 99f4bc0..ea1f7af 100644
+--- a/frontend/src/api.js
++++ b/frontend/src/api.js
+@@ -37,15 +37,6 @@ export async function deleteClub(clubId) {
+     return await response.json();
+ }
+ 
+-export async function getFrames() {
+-    const response = await fetch(`${API_URL}/frames`);
+-    if (!response.ok) {
+-        const errorData = await response.json();
+-        throw new Error(errorData.detail || "Error al obtener los datos");
+-    }
+-    return await response.json();
+-}
+-
+ export async function uploadExcel(file, matchName, times, fieldId, thresholds, lineup) {
+     const teamId = localStorage.getItem("activeTeamId"); 
+     if (!teamId) throw new Error("No has seleccionado un equipo activo");
+diff --git a/requirements.txt b/requirements.txt
+index b295ed074e7ec7a2cfaa3fc1abb6d6f7db213d8a..d6e626f4f9669a9d3b6970dde54c388d7be09305 100644
+GIT binary patch
+literal 431
+zcmX|7L2kn!5WMr3Ai#E-9Eg-_)kCXR>d~T@)TkJcy{=4O-yunR+?k!(oiQ;cGUSHc
+zkgV2%3*IvG4^qi)sqh0AfQwIBw_GYN*@vA=rV~cNZ1DC=>jQ5<*c8%iCR1fC-!n)3
+zHie51PHP2!!7gSYlYL!~O$W&+<#pJD^h1OcMv}#K%B6~0-msKi%w-E#j(04ZI2ioa
+zz*4eY1{2960)A7Kz5~5Y^Yw5mfj*bV_qP*v4p^Wu#od7LD|y%|euPy{3yD8+S_AoP
+zX2h(`9NFSGttFSWj@Or`bFibEN;MP=ndab#a82;8R)qF^{M`AtWM|2zc&kL+iQaAG
+d;sP8o&}s)0`oTlUuY~Fldj0nJ|E8-qegU8Qf~x=k
+
+literal 780
+zcmZWn(N2Rv5S(WdKcx+{wCY2@g*4b&A|96l2K@Ny%&u23rn!<Zvopi&ecz4<{I%$D
+z<T>FLE1nh=4*X?U+bQsf2QvP1drXL&>+bv~n@Ri$HPxh5@O_Sr{R^$o5UcQR=riAM
+z7g$TQ#g(2PJSmGb_Lk+uv?WHO4bIeQm_aP*dun-{IosK{MRJl#PN&`7>%vs|0^6H{
+zrfW74e%(D=Zr%X{eIvg-IV#uIu-4iLhK@`nhR?3)Db+~DKxHLMs1m!jRD}hmRy)bT
+zn@b9RIVE}OYHpyQ+Uz$`>q17b-TIyf)AxMp?1e`uB6(^ov#cF6jFv%qIp*DZt5@s2
+zC*QrLuv_fdZ%0k%H+t*YSwEGzE0MlWQ)+Nyp39k%x}&LUQa4FY&G>E77CmW?FY8VB
+X*gMOpC*1ck;M4k4PfJ(7FWSowYeI5B
+
+-- 
+2.43.0
+
