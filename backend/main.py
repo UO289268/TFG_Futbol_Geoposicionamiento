@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -11,7 +11,7 @@ import jwt
 import datetime
 
 import models
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -28,6 +28,48 @@ app.add_middleware(
 SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
 ALGORITHM = "HS256"
 
+# Roles: existe un unico administrador (creado al arrancar) y las cuentas del
+# cuerpo tecnico, que tienen los mismos permisos de uso.
+ADMIN_ROLE = "admin"
+ROLES_PERMITIDOS = {"entrenador", "analista", "preparador_fisico"}
+
+
+def crear_admin_inicial():
+    """Crea la cuenta de administrador a partir de ADMIN_EMAIL y ADMIN_PASSWORD si aun no existe."""
+    email = os.environ.get("ADMIN_EMAIL")
+    password = os.environ.get("ADMIN_PASSWORD")
+    db = SessionLocal()
+    try:
+        if db.query(models.User).filter(models.User.role == ADMIN_ROLE).first():
+            return
+        if not email or not password:
+            print("AVISO: no hay administrador y faltan ADMIN_EMAIL / ADMIN_PASSWORD; no se puede iniciar sesion.")
+            return
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        db.add(models.User(email=email, hashed_password=hashed, name="Administrador", role=ADMIN_ROLE))
+        db.commit()
+    finally:
+        db.close()
+
+
+crear_admin_inicial()
+
+
+def get_admin(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Valida el token JWT y exige que pertenezca al administrador."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Falta el token de autenticacion")
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Token no valido o caducado")
+    user = db.query(models.User).filter(models.User.id == payload.get("id")).first()
+    if not user or user.role != ADMIN_ROLE:
+        raise HTTPException(status_code=403, detail="Solo el administrador puede realizar esta accion")
+    return user
+
+
 CAMPOS_FILE = "data/campos.json"
 MATCHES_DIR = "data/matches"
 os.makedirs(MATCHES_DIR, exist_ok=True)
@@ -40,9 +82,13 @@ def register_user(
     email: str = Form(...), 
     password: str = Form(...), 
     name: str = Form(...), 
-    role: str = Form("jugador"), 
+    role: str = Form(...), 
+    admin: models.User = Depends(get_admin),
     db: Session = Depends(get_db)
 ):
+    if role not in ROLES_PERMITIDOS:
+        raise HTTPException(status_code=400, detail="Rol no permitido: use entrenador, analista o preparador_fisico")
+
     db_user = db.query(models.User).filter(models.User.email == email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="El email ya está registrado")
