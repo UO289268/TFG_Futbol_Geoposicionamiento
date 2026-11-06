@@ -2,6 +2,9 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import pandas as pd
+import numpy as np
+import secrets
+import time
 import io
 import json
 import os
@@ -17,15 +20,23 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# Origenes permitidos para CORS, separados por comas (por defecto, el cliente de desarrollo).
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SECRET_KEY = "tu_clave_secreta_super_segura_tfg"
+# La clave de firma se lee del entorno. Si no esta definida se genera una aleatoria:
+# funciona, pero las sesiones se invalidan cada vez que se reinicia el servidor.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    print("AVISO: SECRET_KEY no definida; se usa una clave temporal.")
 ALGORITHM = "HS256"
 
 # Roles: existe un unico administrador (creado al arrancar) y las cuentas del
@@ -55,8 +66,8 @@ def crear_admin_inicial():
 crear_admin_inicial()
 
 
-def get_admin(authorization: str = Header(None), db: Session = Depends(get_db)):
-    """Valida el token JWT y exige que pertenezca al administrador."""
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Valida el token JWT de la cabecera Authorization y devuelve el usuario."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Falta el token de autenticacion")
     token = authorization.split(" ", 1)[1]
@@ -65,7 +76,14 @@ def get_admin(authorization: str = Header(None), db: Session = Depends(get_db)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Token no valido o caducado")
     user = db.query(models.User).filter(models.User.id == payload.get("id")).first()
-    if not user or user.role != ADMIN_ROLE:
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+    return user
+
+
+def get_admin(user: models.User = Depends(get_current_user)):
+    """Exige que el usuario autenticado sea el administrador."""
+    if user.role != ADMIN_ROLE:
         raise HTTPException(status_code=403, detail="Solo el administrador puede realizar esta accion")
     return user
 
@@ -126,7 +144,7 @@ def login(email: str = Form(...), password: str = Form(...), db: Session = Depen
 # ==========================================
 #        CLUBES
 # ==========================================
-@app.get("/clubs")
+@app.get("/clubs", dependencies=[Depends(get_current_user)])
 def get_clubs(db: Session = Depends(get_db)):
     clubs = db.query(models.Club).all()
     
@@ -151,7 +169,7 @@ def get_clubs(db: Session = Depends(get_db)):
         })
     return res
 
-@app.post("/clubs")
+@app.post("/clubs", dependencies=[Depends(get_current_user)])
 def create_club(
     name: str = Form(...),
     location: str = Form("Desconocida"),
@@ -168,11 +186,11 @@ def create_club(
 # ==========================================
 #        EQUIPOS
 # ==========================================
-@app.get("/club/{club_id}/teams")
+@app.get("/club/{club_id}/teams", dependencies=[Depends(get_current_user)])
 def get_teams(club_id: int, db: Session = Depends(get_db)):
     return db.query(models.Team).filter(models.Team.club_id == club_id).all()
 
-@app.post("/club/{club_id}/teams")
+@app.post("/club/{club_id}/teams", dependencies=[Depends(get_current_user)])
 def create_team(club_id: int, name: str = Form(...), category: str = Form(...), db: Session = Depends(get_db)):
     new_team = models.Team(name=name, category=category, club_id=club_id)
     db.add(new_team)
@@ -180,7 +198,7 @@ def create_team(club_id: int, name: str = Form(...), category: str = Form(...), 
     db.refresh(new_team)
     return {"id": new_team.id, "name": new_team.name, "category": new_team.category, "club_id": new_team.club_id}
 
-@app.delete("/clubs/{club_id}")
+@app.delete("/clubs/{club_id}", dependencies=[Depends(get_current_user)])
 def delete_club(club_id: int, db: Session = Depends(get_db)):
     db_club = db.query(models.Club).filter(models.Club.id == club_id).first()
     if db_club:
@@ -198,12 +216,12 @@ def delete_club(club_id: int, db: Session = Depends(get_db)):
 # ==========================================
 #        PLANTILLA
 # ==========================================
-@app.get("/team/{team_id}/players")
+@app.get("/team/{team_id}/players", dependencies=[Depends(get_current_user)])
 def get_players(team_id: int, db: Session = Depends(get_db)):
     players = db.query(models.Player).filter(models.Player.team_id == team_id).order_by(models.Player.dorsal).all()
     return players
 
-@app.post("/team/{team_id}/players")
+@app.post("/team/{team_id}/players", dependencies=[Depends(get_current_user)])
 def add_player(
     team_id: int, 
     dorsal: str = Form(...),
@@ -237,12 +255,12 @@ def cargar_campos():
 def get_fields():
     return cargar_campos()
 
-@app.get("/matches/team/{team_id}")
+@app.get("/matches/team/{team_id}", dependencies=[Depends(get_current_user)])
 def get_saved_matches(team_id: int, db: Session = Depends(get_db)):
     matches = db.query(models.Match).filter(models.Match.team_id == team_id).order_by(models.Match.date.desc()).all()
     return [{"id": m.id, "name": m.name, "date": m.date, "field": m.field, "filename": m.filename} for m in matches]
 
-@app.get("/matches/{match_id}")
+@app.get("/matches/{match_id}", dependencies=[Depends(get_current_user)])
 def load_match(match_id: str):
     path = os.path.join(MATCHES_DIR, f"{match_id}.json")
     if not os.path.exists(path):
@@ -250,7 +268,7 @@ def load_match(match_id: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-@app.get("/matches/{match_id}/resumen")
+@app.get("/matches/{match_id}/resumen", dependencies=[Depends(get_current_user)])
 def get_match_summary(match_id: str, db: Session = Depends(get_db)):
     db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
     if not db_match:
@@ -266,7 +284,7 @@ def get_match_summary(match_id: str, db: Session = Depends(get_db)):
         "resumen": db_match.resumen
     }
 
-@app.delete("/matches/{match_id}")
+@app.delete("/matches/{match_id}", dependencies=[Depends(get_current_user)])
 def delete_match(match_id: str, db: Session = Depends(get_db)):
     db_match = db.query(models.Match).filter(models.Match.id == match_id).first()
     if db_match:
@@ -279,7 +297,7 @@ def delete_match(match_id: str, db: Session = Depends(get_db)):
         
     return {"status": "success", "message": "Partido eliminado"}
 
-@app.post("/upload")
+@app.post("/upload", dependencies=[Depends(get_current_user)])
 def upload_excel(
     file: UploadFile = File(...),
     match_name: str = Form("Partido sin nombre"),
@@ -308,9 +326,15 @@ def upload_excel(
             "minLon": campo_select["lon_tl"], "maxLon": campo_select["lon_br"]
         } if campo_select else None
 
+        t_inicio = time.perf_counter()
         contents = file.file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        try:
+            # calamine lee el .xlsx mucho mas rapido que openpyxl (motor por defecto)
+            df = pd.read_excel(io.BytesIO(contents), engine="calamine")
+        except ImportError:
+            df = pd.read_excel(io.BytesIO(contents))
         
+        t_leido = time.perf_counter()
         columnas_req = {'local_time', 'DEV', 'lat', 'lon', 'vel'}
         if not columnas_req.issubset(set(df.columns)):
             raise ValueError(f"Faltan columnas. Se requieren: {columnas_req}")
@@ -392,27 +416,23 @@ def upload_excel(
                 "total": get_period_stats(df_sincronizado) 
             }
 
-            lista_jugador = []
-            for _, row in df_sincronizado.iterrows():
-                if pd.isna(row['lat']):
-                    lista_jugador.append(None)
-                else:
-                    v, a, pl = row['vel'], row['acc'] if not pd.isna(row['acc']) else 0, row['pl_frame'] if not pd.isna(row['pl_frame']) else 0
-                    zona = "Trote"
-                    if v > ms_sprint: zona = "Sprint"
-                    elif v > ms_hsr: zona = "HSR"
-                    elif v > 3.0: zona = "HMLD"
-                    fuerza = "Normal"
-                    if a > u_acel: fuerza = "Acel"
-                    elif a < -u_acel: fuerza = "Decel"
-
-                    lista_jugador.append({
-                        "lat": row['lat'], "lon": row['lon'], "vel": v, "acc": a,
-                        "zona": zona, "fuerza": fuerza, "pl": pl
-                    })
+            # Generacion vectorizada de los fotogramas (equivalente al antiguo bucle
+            # fila a fila con iterrows, pero unas diez veces mas rapida).
+            v = df_sincronizado['vel'].to_numpy()
+            a = df_sincronizado['acc'].fillna(0).to_numpy()
+            pl = df_sincronizado['pl_frame'].fillna(0).to_numpy()
+            zona = np.select([v > ms_sprint, v > ms_hsr, v > 3.0], ["Sprint", "HSR", "HMLD"], default="Trote")
+            fuerza = np.select([a > u_acel, a < -u_acel], ["Acel", "Decel"], default="Normal")
+            registros = pd.DataFrame({
+                "lat": df_sincronizado['lat'].to_numpy(), "lon": df_sincronizado['lon'].to_numpy(),
+                "vel": v, "acc": a, "zona": zona, "fuerza": fuerza, "pl": pl
+            }).to_dict("records")
+            sin_posicion = df_sincronizado['lat'].isna().to_numpy()
+            lista_jugador = [None if vacio else reg for vacio, reg in zip(sin_posicion, registros)]
             
             players_dict[dev_str] = lista_jugador
 
+        print(f"[upload] lectura del Excel: {t_leido - t_inicio:.1f} s; procesamiento: {time.perf_counter() - t_leido:.1f} s")
         match_id = str(uuid.uuid4())
         campo_nombre = campo_select["nombre"] if campo_select else "Campo"
         
@@ -447,7 +467,7 @@ def upload_excel(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/jugador/{player_id}/stats")
+@app.get("/jugador/{player_id}/stats", dependencies=[Depends(get_current_user)])
 def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     player = db.query(models.Player).filter(models.Player.id == player_id).first()
     if not player:

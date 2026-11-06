@@ -1,5 +1,22 @@
 const API_URL = "http://127.0.0.1:8000";
 
+// Todas las peticiones (salvo el login) envian el token JWT en la cabecera
+// Authorization. Si el servidor responde 401 (sin token, caducado o no valido)
+// se cierra la sesion y se vuelve a la pantalla de inicio de sesion.
+async function authFetch(url, options = {}) {
+    const token = localStorage.getItem("token");
+    const headers = { ...(options.headers || {}) };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401) {
+        ["token", "user", "activeClub", "activeClubId", "activeTeam", "activeTeamId", "activeTeamCategory"]
+            .forEach((k) => localStorage.removeItem(k));
+        window.location.href = "/login";
+        throw new Error("La sesión ha caducado. Inicia sesión de nuevo.");
+    }
+    return response;
+}
+
 export const CATEGORIAS_UMBRALES = {
   "Absoluto Masculino": { sprint: 24.0, hsr: 21.0, acel: 3.0 },
   "Absoluto Femenino": { sprint: 21.0, hsr: 18.0, acel: 2.8 },
@@ -11,7 +28,7 @@ export const CATEGORIAS_UMBRALES = {
 };
 
 export async function getClubs() {
-    const response = await fetch(`${API_URL}/clubs`);
+    const response = await authFetch(`${API_URL}/clubs`);
     return await response.json();
 }
 
@@ -22,7 +39,7 @@ export async function createClub(clubData) {
     formData.append("color", clubData.color || "#34495e");
     if (clubData.escudo) formData.append("escudo", clubData.escudo);
 
-    const response = await fetch(`${API_URL}/clubs`, {
+    const response = await authFetch(`${API_URL}/clubs`, {
         method: "POST",
         body: formData
     });
@@ -30,7 +47,7 @@ export async function createClub(clubData) {
 }
 
 export async function deleteClub(clubId) {
-    const response = await fetch(`${API_URL}/clubs/${clubId}`, {
+    const response = await authFetch(`${API_URL}/clubs/${clubId}`, {
         method: "DELETE",
     });
     if (!response.ok) throw new Error("Error al eliminar el club");
@@ -62,7 +79,7 @@ export async function uploadExcel(file, matchName, times, fieldId, thresholds, l
         formData.append("alineacion", JSON.stringify(lineup));
     }
 
-    const response = await fetch(`${API_URL}/upload`, {
+    const response = await authFetch(`${API_URL}/upload`, {
         method: "POST",
         body: formData,
     });
@@ -78,19 +95,19 @@ export async function getSavedMatches() {
     const teamId = localStorage.getItem("activeTeamId"); 
     if (!teamId) throw new Error("No has seleccionado un equipo");
 
-    const response = await fetch(`${API_URL}/matches/team/${teamId}`);
+    const response = await authFetch(`${API_URL}/matches/team/${teamId}`);
     if (!response.ok) throw new Error("Error al obtener la lista de partidos");
     return await response.json();
 }
 
 export async function loadSavedMatch(matchId) {
-    const response = await fetch(`${API_URL}/matches/${matchId}`);
+    const response = await authFetch(`${API_URL}/matches/${matchId}`);
     if (!response.ok) throw new Error("Error al cargar el partido");
     return await response.json();
 }
 
 export async function getMatchSummary(matchId) {
-    const response = await fetch(`${API_URL}/matches/${matchId}/resumen`);
+    const response = await authFetch(`${API_URL}/matches/${matchId}/resumen`);
     if (!response.ok) {
         throw new Error("Error al obtener el resumen del partido");
     }
@@ -98,7 +115,7 @@ export async function getMatchSummary(matchId) {
 }
 
 export async function deleteSavedMatch(matchId) {
-    const response = await fetch(`${API_URL}/matches/${matchId}`, {
+    const response = await authFetch(`${API_URL}/matches/${matchId}`, {
         method: "DELETE",
     });
     if (!response.ok) throw new Error("Error al eliminar el partido");
@@ -107,7 +124,7 @@ export async function deleteSavedMatch(matchId) {
 
 export async function getClubTeams() {
     const clubId = localStorage.getItem("activeClubId");
-    const response = await fetch(`${API_URL}/club/${clubId}/teams`);
+    const response = await authFetch(`${API_URL}/club/${clubId}/teams`);
     return await response.json();
 }
 
@@ -117,7 +134,7 @@ export async function createTeam(teamData) {
     formData.append("name", teamData.name);
     formData.append("category", teamData.category);
 
-    const response = await fetch(`${API_URL}/club/${clubId}/teams`, {
+    const response = await authFetch(`${API_URL}/club/${clubId}/teams`, {
         method: "POST",
         body: formData
     });
@@ -128,7 +145,7 @@ export async function getTeamPlayers() {
     const teamId = localStorage.getItem("activeTeamId"); 
     if (!teamId) throw new Error("No has seleccionado un equipo activo");
 
-    const response = await fetch(`${API_URL}/team/${teamId}/players`);
+    const response = await authFetch(`${API_URL}/team/${teamId}/players`);
     if (!response.ok) throw new Error("Error al obtener la plantilla");
     return await response.json();
 }
@@ -143,7 +160,7 @@ export async function addPlayer(playerData) {
     formData.append("position", playerData.position);
     if (playerData.photo_url) formData.append("photo_url", playerData.photo_url);
 
-    const response = await fetch(`${API_URL}/team/${teamId}/players`, {
+    const response = await authFetch(`${API_URL}/team/${teamId}/players`, {
         method: "POST",
         body: formData
     });
@@ -153,7 +170,7 @@ export async function addPlayer(playerData) {
 }
 
 export async function getPlayerStats(playerId) {
-    const response = await fetch(`${API_URL}/jugador/${playerId}/stats`);
+    const response = await authFetch(`${API_URL}/jugador/${playerId}/stats`);
     if (!response.ok) {
         throw new Error("Error al obtener las estadísticas del jugador");
     }
