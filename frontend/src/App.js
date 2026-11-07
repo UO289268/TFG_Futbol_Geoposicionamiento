@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { 
   uploadExcel, 
@@ -17,6 +17,8 @@ import Plantilla from "./Plantilla";
 import PlayerDashboard from "./PlayerDashboard";
 import TeamComparison from "./TeamComparison";
 import Sesiones from "./Sesiones";
+import Alertas, { colorRegla } from "./Alertas";
+import { calcularEpisodios } from "./tactica";
 
 const DEFAULT_ROLES = [
   { id: "Banquillo", name: "Banquillo ⚫", color: "#000000", isDefault: true },
@@ -84,6 +86,8 @@ function App() {
   const [selectedField, setSelectedField] = useState("");
   const [fieldLimits, setFieldLimits] = useState(null);
   const [showLines, setShowLines] = useState(false);
+  const [lineMode, setLineMode] = useState("players"); // players | centroids | both
+  const [reglasAlerta, setReglasAlerta] = useState([]);
   
   const [thresholds, setThresholds] = useState({ sprint: 24.0, hsr: 21.0, acel: 3.0 });
   const [teamCategory, setTeamCategory] = useState("Categoría Desconocida");
@@ -103,6 +107,21 @@ function App() {
   const [selectedHeatPlayer, setSelectedHeatPlayer] = useState("");
 
   const [selectedPeriod, setSelectedPeriod] = useState("total");
+
+  // Episodios de alerta del partido completo; se recalculan sólo al cambiar las reglas,
+  // el partido o la asignación de líneas, no en cada fotograma.
+  const alertEpisodes = useMemo(
+    () => calcularEpisodios(reglasAlerta, players, playerRoles, visiblePlayers, maxFrames, activeConfig?.h1_frames || maxFrames),
+    [reglasAlerta, players, playerRoles, visiblePlayers, maxFrames, activeConfig]
+  );
+
+  // Salta al inicio de un episodio, ajustando el periodo si queda fuera del seleccionado.
+  const seekToFrame = (f) => {
+    const h1Frames = activeConfig?.h1_frames || maxFrames;
+    if ((selectedPeriod === "h2" && f < h1Frames) || (selectedPeriod === "h1" && f >= h1Frames)) setSelectedPeriod("total");
+    setIsPlaying(false);
+    setFrame(f);
+  };
 
   useEffect(() => {
     if (appMode === "new") {
@@ -506,7 +525,8 @@ function App() {
             </button>
           </div>
 
-          <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} showLines={showLines} roles={roles} speed={speed} heatmapMode={heatmapMode} heatmapData={getHeatmapData()} />
+          <Pitch players={players} frame={frame} visiblePlayers={visiblePlayers} selectedPlayer={selectedPlayer} playerRoles={playerRoles} fieldLimits={fieldLimits} showLines={showLines} lineMode={lineMode} roles={roles} speed={speed} heatmapMode={heatmapMode} heatmapData={getHeatmapData()}
+            activeAlerts={alertEpisodes.filter(e => frame >= e.start && frame <= e.end).map(e => ({ ...e, color: colorRegla(reglasAlerta, e.reglaId) }))} />
 
           <div style={{ backgroundColor: "white", padding: "15px", borderRadius: "8px", marginTop: "10px", border: "1px solid #bdc3c7", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "15px", marginBottom: "15px" }}>
@@ -528,6 +548,22 @@ function App() {
                 <span style={{ color: "#666", fontSize: "12px" }}> / {formatTimeDynamic(endFrame)}</span>
               </div>
             </div>
+
+            {alertEpisodes.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "-5px", marginBottom: "12px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "#922b21", minWidth: "60px" }}>🚨 Alertas</span>
+                <div style={{ position: "relative", flexGrow: 1, height: "14px", backgroundColor: "#f4f6f8", borderRadius: "3px" }}>
+                  {alertEpisodes.filter(e => e.end >= startFrame && e.start < endFrame).map((e, i) => {
+                    const span = Math.max(1, endFrame - startFrame);
+                    const left = ((Math.max(e.start, startFrame) - startFrame) / span) * 100;
+                    const width = Math.max(0.4, ((Math.min(e.end, endFrame) - Math.max(e.start, startFrame) + 1) / span) * 100);
+                    return <div key={`mark-${i}`} onClick={() => seekToFrame(e.start)} title={`Ir a ${formatTimeDynamic(e.start)}`}
+                      style={{ position: "absolute", left: `${left}%`, width: `${width}%`, top: 0, bottom: 0, backgroundColor: colorRegla(reglasAlerta, e.reglaId), opacity: 0.85, cursor: "pointer", borderRadius: "2px" }} />;
+                  })}
+                  <div style={{ position: "absolute", left: `${((frame - startFrame) / Math.max(1, endFrame - startFrame)) * 100}%`, top: "-3px", bottom: "-3px", width: "2px", backgroundColor: "#007bff" }} />
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "flex", flexDirection: "column", borderTop: "1px solid #ccc", paddingTop: "15px", paddingBottom: "15px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
@@ -595,6 +631,9 @@ function App() {
             )}
           </div>
 
+          <Alertas reglas={reglasAlerta} setReglas={setReglasAlerta} episodios={alertEpisodes} players={players} roles={roles} playerRoles={playerRoles}
+            h1Frames={activeConfig?.h1_frames || maxFrames} hayH2={hasH2} frame={frame} onSeek={seekToFrame} />
+
           <h3 style={{ borderBottom: "2px solid #bdc3c7", paddingBottom: "10px", marginTop: 0, color: "#2c3e50" }}>Gestión Táctica</h3>
           <div style={{ marginBottom: "20px", padding: "15px", backgroundColor: "#f8f9fa", borderRadius: "8px", border: "1px solid #e0e0e0" }}>
             <h4 style={{ margin: "0 0 10px 0", fontSize: "14px", color: "#34495e" }}>Crear Nueva Línea/Posición</h4>
@@ -616,6 +655,13 @@ function App() {
           <div style={{ marginBottom: "20px", padding: "10px", backgroundColor: "#f8f9fa", borderRadius: "5px", border: "1px solid #e0e0e0", display: "flex", alignItems: "center", gap: "10px" }}>
             <input type="checkbox" id="lines-toggle" checked={showLines} onChange={(e) => setShowLines(e.target.checked)} style={{ width: "18px", height: "18px", cursor: "pointer" }} />
             <label htmlFor="lines-toggle" style={{ fontWeight: "bold", cursor: "pointer", color: "#2c3e50" }}>Unir líneas por posición</label>
+            {showLines && (
+              <select value={lineMode} onChange={(e) => setLineMode(e.target.value)} style={{ marginLeft: "auto", padding: "4px", borderRadius: "4px", border: "1px solid #bdc3c7", cursor: "pointer" }}>
+                <option value="players">Distancia entre jugadoras</option>
+                <option value="centroids">Distancia entre centroides</option>
+                <option value="both">Ambas</option>
+              </select>
+            )}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "10px", overflowY: "auto", flex: 1 }}>
