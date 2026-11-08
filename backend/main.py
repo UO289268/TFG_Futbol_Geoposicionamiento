@@ -537,10 +537,15 @@ def get_player_stats(player_id: int, db: Session = Depends(get_db)):
     else:
         player_load_acumulado = [{"minuto": 0, "load": 0}, {"minuto": 90, "load": 0}]
 
-    dist_trote = kpis_totales["distancia"] - kpis_totales["hsr"] - kpis_totales["sprints"]*10 
+    # Reparto de la distancia en dos zonas que suman el 100 %: la HSR ya incluye
+    # la distancia recorrida a velocidad de sprint, por lo que no se descuenta aparte.
+    dist_total = kpis_totales["distancia"]
+    dist_hsr = min(kpis_totales["hsr"], dist_total)
+    pct_hsr = round(dist_hsr / dist_total * 100, 1) if dist_total > 0 else 0
+    pct_bajo = round(100 - pct_hsr, 1) if dist_total > 0 else 0
     zonas_velocidad = [
-        {"name": 'Trote', "value": round((dist_trote / (kpis_totales["distancia"]+1)) * 100, 1), "color": '#f1c40f'},
-        {"name": 'HSR', "value": round((kpis_totales["hsr"] / (kpis_totales["distancia"]+1)) * 100, 1), "color": '#e67e22'}
+        {"name": 'Por debajo de HSR', "value": pct_bajo, "color": '#f1c40f'},
+        {"name": 'HSR (incluye sprint)', "value": pct_hsr, "color": '#e67e22'}
     ]
 
     return {

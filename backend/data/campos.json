@@ -1,18 +1,10 @@
 [
   {
     "id": "campo_universitario",
-    "nombre": "Campo Universitario Principal 🏟️",
+    "nombre": "Estadio Jose Ramón Suárez Fernández",
     "lat_tl": 43.355678,
     "lon_tl": -5.923398,
     "lat_br": 43.355217,
     "lon_br": -5.922066
-  },
-  {
-    "id": "campo_2",
-    "nombre": "Campo de Entrenamiento Anexo",
-    "lat_tl": 43.100000,
-    "lon_tl": -5.100000,
-    "lat_br": 43.099000,
-    "lon_br": -5.098000
   }
 ]

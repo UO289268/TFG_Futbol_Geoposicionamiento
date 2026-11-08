@@ -8,7 +8,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     name = Column(String)
-    role = Column(String, default="jugador")
+    role = Column(String, nullable=False)  # "admin" o un rol del cuerpo tecnico; sin valor por defecto
 
 # NUEVA TABLA: Clubes
 class Club(Base):
