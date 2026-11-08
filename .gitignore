@@ -15,4 +15,4 @@ backend/data/*
 
 # --- Otros ---
 .DS_Store
-/scripts/medir_fases.py
+scripts/medir_fases.py
